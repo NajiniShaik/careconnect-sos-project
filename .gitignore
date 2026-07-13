@@ -19,4 +19,12 @@ admin-web/build/
 
 # OS files
 .DS_Store
-Thumbs.db
+Thumbs.db 
+
+# Root virtual environment
+.venv/
+
+# Mobile app
+mobile-app/node_modules/
+mobile-app/.expo/
+mobile-app/.claude/
