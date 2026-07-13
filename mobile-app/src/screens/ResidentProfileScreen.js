@@ -239,9 +239,15 @@ export default function ResidentProfileScreen() {
               </View>
               {verificationError ? <Text style={styles.error}>{verificationError}</Text> : null}
               <View style={styles.contactActions}>
-                <Button title={resendingContactId === contact.id ? "Sending..." : "Resend"} onPress={() => handleResendVerification(contact.id)} disabled={resendingContactId === contact.id} />
-                <Button title="Edit" onPress={() => startEditContact(contact)} />
-                <Button title="Remove" onPress={() => handleDeleteContact(contact.id)} />
+                <View style={styles.actionButton}>
+                  <Button title={resendingContactId === contact.id ? "Sending..." : "Resend"} onPress={() => handleResendVerification(contact.id)} disabled={resendingContactId === contact.id} />
+                </View>
+                <View style={styles.actionButton}>
+                  <Button title="Edit" onPress={() => startEditContact(contact)} />
+                </View>
+                <View style={styles.actionButton}>
+                  <Button title="Remove" onPress={() => handleDeleteContact(contact.id)} />
+                </View>
               </View>
             </View>
           ))
@@ -276,8 +282,14 @@ export default function ResidentProfileScreen() {
           />
           {contactFormError ? <Text style={styles.error}>{contactFormError}</Text> : null}
           <View style={styles.contactActions}>
-            <Button title={contactSaving ? "Saving..." : editingContactId ? "Save changes" : "Add contact"} onPress={handleContactSubmit} disabled={contactSaving} />
-            {editingContactId ? <Button title="Cancel" onPress={resetContactForm} /> : null}
+            <View style={styles.actionButton}>
+              <Button title={contactSaving ? "Saving..." : editingContactId ? "Save changes" : "Add contact"} onPress={handleContactSubmit} disabled={contactSaving} />
+            </View>
+            {editingContactId ? (
+              <View style={styles.actionButton}>
+                <Button title="Cancel" onPress={resetContactForm} />
+              </View>
+            ) : null}
           </View>
         </View>
       </View>
@@ -288,7 +300,9 @@ export default function ResidentProfileScreen() {
       </View>
 
       <View style={styles.card}>
-        <Button title="Back to dashboard" onPress={() => router.replace("/dashboard")} />
+        <View style={styles.buttonWrapper}>
+          <Button title="Back to dashboard" onPress={() => router.replace("/dashboard")} />
+        </View>
       </View>
     </ScrollView>
   );
@@ -310,20 +324,22 @@ const styles = StyleSheet.create({
   subtitle: { fontSize: 15, color: "#666", marginBottom: 16 },
   card: { backgroundColor: "#fff", borderRadius: 12, padding: 14, marginBottom: 14, shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 6, elevation: 2 },
   cardTitle: { fontSize: 17, fontWeight: "700", marginBottom: 10 },
-  row: { flexDirection: "row", justifyContent: "space-between", marginBottom: 8, gap: 8 },
+  row: { flexDirection: "row", justifyContent: "space-between", marginBottom: 8 },
   rowLabel: { fontWeight: "600", color: "#444" },
   rowValue: { flex: 1, textAlign: "right", color: "#222" },
   helper: { color: "#666", marginTop: 6 },
   error: { color: "#d32f2f", marginTop: 6 },
   inputRow: { marginTop: 8 },
   label: { fontWeight: "600", marginBottom: 4 },
-  input: { borderWidth: 1, borderColor: "#ccc", borderRadius: 8, padding: 10, marginBottom: 8 },
-  contactItem: { paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: "#f0f0f0" },
-  contactName: { fontWeight: "600" },
+  input: { borderWidth: 1, borderColor: "#d1d5db", borderRadius: 12, padding: 12, marginBottom: 8, backgroundColor: "#fff", color: "#111" },
+  contactItem: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "#f0f0f0" },
+  contactName: { fontWeight: "600", color: "#111" },
   badge: { alignSelf: "flex-start", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, marginTop: 6 },
   badgeWarning: { backgroundColor: "#fff4d6" },
   badgeSuccess: { backgroundColor: "#e8f5e9" },
   badgeDanger: { backgroundColor: "#fdecea" },
   badgeText: { fontSize: 12, fontWeight: "700" },
-  contactActions: { flexDirection: "row", gap: 8, marginTop: 8, justifyContent: "flex-start" },
+  contactActions: { flexDirection: "row", flexWrap: "wrap", marginTop: 8, justifyContent: "flex-start" },
+  actionButton: { minWidth: 90, marginBottom: 8, borderRadius: 12, overflow: "hidden", marginRight: 8 },
+  buttonWrapper: { borderRadius: 12, overflow: "hidden" },
 });

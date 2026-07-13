@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Button, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useRouter } from "expo-router";
+import SearchableDropdown from "../components/common/SearchableDropdown";
 import { api, getErrorMessage, persistAuth } from "../services/authService";
 import { getRegistrationRequest } from "../services/registrationService";
 
@@ -34,7 +35,11 @@ export default function RegisterScreen() {
   const [form, setForm] = useState(initialForm);
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [loadingLookups, setLoadingLookups] = useState(false);
   const [errors, setErrors] = useState({});
+  const [societies, setSocieties] = useState([]);
+  const [blocks, setBlocks] = useState([]);
+  const [flats, setFlats] = useState([]);
 
   const role = form.role;
 
@@ -73,9 +78,48 @@ export default function RegisterScreen() {
     return nextErrors;
   }, [form, role]);
 
+  useEffect(() => {
+    const loadLookups = async () => {
+      if (role !== "RESIDENT") return;
+
+      setLoadingLookups(true);
+      try {
+        const [societiesRes, blocksRes, flatsRes] = await Promise.all([
+          api.get("/society/societies/"),
+          api.get("/society/blocks/"),
+          api.get("/society/flats/"),
+        ]);
+        setSocieties(societiesRes.data || []);
+        setBlocks(blocksRes.data || []);
+        setFlats(flatsRes.data || []);
+      } catch (error) {
+        Alert.alert("Lookup failed", getErrorMessage(error));
+      } finally {
+        setLoadingLookups(false);
+      }
+    };
+
+    void loadLookups();
+  }, [role]);
+
   const updateField = (field, value) => {
     setForm((prev) => ({ ...prev, [field]: value }));
     setErrors((prev) => ({ ...prev, [field]: undefined }));
+  };
+
+  const handleSocietySelect = (item) => {
+    updateField("society", String(item.id));
+    updateField("block", "");
+    updateField("flat", "");
+  };
+
+  const handleBlockSelect = (item) => {
+    updateField("block", String(item.id));
+    updateField("flat", "");
+  };
+
+  const handleFlatSelect = (item) => {
+    updateField("flat", String(item.id));
   };
 
   const goNext = () => {
@@ -104,13 +148,19 @@ export default function RegisterScreen() {
     try {
       const { endpoint, payload } = getRegistrationRequest(form);
       const res = await api.post(endpoint, payload);
-      await persistAuth({ access: res.data.access, refresh: res.data.refresh }, res.data.user);
+      const user = res.data?.user;
+      const residentSetupComplete = form.role === "RESIDENT" ? Boolean(form.society && form.block && form.flat) : true;
+      const residentProfile = form.role === "RESIDENT"
+        ? {
+            society: form.society,
+            block: form.block,
+            flat: form.flat,
+            residentSetupComplete,
+          }
+        : { residentSetupComplete };
+      await persistAuth({ access: res.data.access, refresh: res.data.refresh }, { ...user, ...residentProfile });
       Alert.alert("Registration successful", "Your account has been created.");
-      if (form.role === "RESIDENT") {
-        router.replace("/society-setup");
-      } else {
-        router.replace("/dashboard");
-      }
+      router.replace("/dashboard");
     } catch (error) {
       Alert.alert("Registration failed", getErrorMessage(error));
     } finally {
@@ -153,7 +203,9 @@ export default function RegisterScreen() {
           {errors.phone ? <Text style={styles.error}>{errors.phone}</Text> : null}
 
           <View style={styles.buttonRow}>
-            <Button title="Next" onPress={goNext} />
+            <View style={styles.buttonWrapper}>
+              <Button title="Next" onPress={goNext} />
+            </View>
           </View>
         </View>
       )}
@@ -198,25 +250,63 @@ export default function RegisterScreen() {
 
           {role === "RESIDENT" && (
             <View>
-              <Text style={styles.label}>Society ID</Text>
-              <TextInput style={styles.input} value={form.society} onChangeText={(value) => updateField("society", value)} keyboardType="numeric" />
-              {errors.society ? <Text style={styles.error}>{errors.society}</Text> : null}
+              {loadingLookups ? (
+                <ActivityIndicator style={styles.loader} />
+              ) : (
+                <>
+                  <SearchableDropdown
+                    label="Society"
+                    placeholder="Select society"
+                    value={form.society}
+                    options={societies}
+                    onSelect={handleSocietySelect}
+                    getLabel={(item) => item.name}
+                    getValue={(item) => item.id}
+                    emptyText="No societies found"
+                  />
+                  {errors.society ? <Text style={styles.error}>{errors.society}</Text> : null}
 
-              <Text style={styles.label}>Block ID</Text>
-              <TextInput style={styles.input} value={form.block} onChangeText={(value) => updateField("block", value)} keyboardType="numeric" />
-              {errors.block ? <Text style={styles.error}>{errors.block}</Text> : null}
+                  <SearchableDropdown
+                    label="Block / Tower"
+                    placeholder="Select block"
+                    value={form.block}
+                    options={blocks.filter((item) => String(item.society) === String(form.society))}
+                    onSelect={handleBlockSelect}
+                    getLabel={(item) => item.name}
+                    getValue={(item) => item.id}
+                    disabled={!form.society}
+                    emptyText="No blocks found for the selected society"
+                  />
+                  {errors.block ? <Text style={styles.error}>{errors.block}</Text> : null}
 
-              <Text style={styles.label}>Flat ID</Text>
-              <TextInput style={styles.input} value={form.flat} onChangeText={(value) => updateField("flat", value)} keyboardType="numeric" />
-              {errors.flat ? <Text style={styles.error}>{errors.flat}</Text> : null}
+                  <SearchableDropdown
+                    label="Flat"
+                    placeholder="Select flat"
+                    value={form.flat}
+                    options={flats.filter((item) => String(item.block) === String(form.block) && !item.is_occupied)}
+                    onSelect={handleFlatSelect}
+                    getLabel={(item) => item.flat_number}
+                    getValue={(item) => item.id}
+                    disabled={!form.block}
+                    emptyText="No available flats found for the selected block"
+                  />
+                  {errors.flat ? <Text style={styles.error}>{errors.flat}</Text> : null}
+                </>
+              )}
             </View>
           )}
 
           {role === "ADMIN" && <Text style={styles.helper}>Admin registration will create a basic user account.</Text>}
 
           <View style={styles.buttonRow}>
-            <Button title="Back" onPress={() => setStep(1)} />
-            <Button title={loading ? "Creating..." : "Create account"} onPress={goNext} disabled={loading} />
+            <View style={styles.buttonMargin}>
+              <View style={styles.buttonWrapper}>
+                <Button title="Back" onPress={() => setStep(1)} />
+              </View>
+            </View>
+            <View style={styles.buttonWrapper}>
+              <Button title={loading ? "Creating..." : "Create account"} onPress={goNext} disabled={loading} />
+            </View>
           </View>
           {loading ? <ActivityIndicator style={styles.loader} /> : null}
         </View>
@@ -226,15 +316,17 @@ export default function RegisterScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 20, paddingTop: 60, paddingBottom: 80 },
-  title: { fontSize: 24, fontWeight: "700", marginBottom: 4 },
-  subtitle: { fontSize: 16, marginBottom: 16, color: "#555" },
+  container: { padding: 20, paddingTop: 60, paddingBottom: 80, backgroundColor: "#f8fafc" },
+  title: { fontSize: 26, fontWeight: "700", marginBottom: 8, color: "#111" },
+  subtitle: { fontSize: 16, marginBottom: 20, color: "#555" },
   stepRow: { marginBottom: 12 },
-  stepIndicator: { color: "#666" },
-  label: { fontWeight: "600", marginBottom: 6, marginTop: 10 },
-  input: { borderWidth: 1, borderColor: "#ccc", borderRadius: 8, padding: 10, marginBottom: 4 },
-  error: { color: "#d32f2f", marginBottom: 6 },
-  buttonRow: { flexDirection: "row", justifyContent: "space-between", marginTop: 16, gap: 10 },
+  stepIndicator: { color: "#6b7280" },
+  label: { fontWeight: "600", marginBottom: 6, marginTop: 16, color: "#111" },
+  input: { borderWidth: 1, borderColor: "#d1d5db", borderRadius: 12, backgroundColor: "#fff", padding: 12, marginBottom: 8, color: "#111" },
+  error: { color: "#d32f2f", marginTop: 2, marginBottom: 10 },
+  buttonRow: { flexDirection: "row", justifyContent: "space-between", marginTop: 20 },
+  buttonMargin: { flex: 1, marginRight: 12 },
+  buttonWrapper: { flex: 1, borderRadius: 12, overflow: "hidden" },
   optionRow: { marginBottom: 8 },
   helper: { color: "#666", marginTop: 8 },
   loader: { marginTop: 12 },

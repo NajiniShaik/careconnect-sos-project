@@ -10,8 +10,8 @@ import {
   View,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { getErrorMessage } from '../services/authService';
-import { fetchSosHistory, getSosStatusLabel, triggerSosRequest } from '../services/sosService';
+import { getErrorMessage, getStoredUser } from '../services/authService';
+import { buildSosRequestPayload, fetchSosHistory, getSosStatusLabel, mergeSosEvents, normalizeSosEvent, triggerSosRequest } from '../services/sosService';
 
 export default function SosScreen() {
   const router = useRouter();
@@ -19,7 +19,26 @@ export default function SosScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
+  const [statusMessage, setStatusMessage] = useState('');
   const [events, setEvents] = useState([]);
+  const [currentUser, setCurrentUser] = useState(null);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadUser = async () => {
+      const storedUser = await getStoredUser();
+      if (mounted) {
+        setCurrentUser(storedUser);
+      }
+    };
+
+    void loadUser();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const loadEvents = useCallback(async (isRefresh = false) => {
     if (!isRefresh) {
@@ -29,7 +48,8 @@ export default function SosScreen() {
 
     try {
       const res = await fetchSosHistory();
-      setEvents(Array.isArray(res?.data) ? res.data : []);
+      const historyEvents = Array.isArray(res?.data) ? res.data : [];
+      setEvents((prevEvents) => (historyEvents.length === 0 ? prevEvents : historyEvents));
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
@@ -57,32 +77,39 @@ export default function SosScreen() {
   }, [loadEvents]);
 
   const handleSendSos = async () => {
-    Alert.alert(
-      'Confirm SOS',
-      'This will send an emergency alert. Continue?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Send',
-          style: 'destructive',
-          onPress: async () => {
-            setSending(true);
-            setError('');
+    const role = currentUser?.role?.toUpperCase();
 
-            try {
-              await triggerSosRequest();
-              Alert.alert('SOS sent', 'Your emergency alert has been sent successfully.');
-              await loadEvents(true);
-            } catch (err) {
-              setError(getErrorMessage(err));
-              Alert.alert('SOS failed', getErrorMessage(err));
-            } finally {
-              setSending(false);
-            }
-          },
-        },
-      ]
-    );
+    if (role !== 'RESIDENT') {
+      const message = 'SOS alerts are available for resident accounts only.';
+      setError(message);
+      setStatusMessage(message);
+      Alert.alert('Access restricted', message);
+      return;
+    }
+
+    setSending(true);
+    setError('');
+    setStatusMessage('Sending SOS alert...');
+
+    try {
+      const payload = buildSosRequestPayload('Emergency alert triggered from mobile app', 'UNKNOWN');
+      const response = await triggerSosRequest(payload);
+      const createdEvent = normalizeSosEvent(response?.data || {});
+
+      setEvents((prev) => mergeSosEvents(createdEvent, prev));
+      setStatusMessage(response?.data?.message || 'SOS sent successfully.');
+      Alert.alert('SOS sent', 'Your emergency alert has been sent successfully.');
+      await loadEvents(true);
+    } catch (err) {
+      const message = err?.response?.status === 403
+        ? 'Your account is not permitted to send SOS alerts right now.'
+        : getErrorMessage(err);
+      setError(message);
+      setStatusMessage(`SOS send failed: ${message}`);
+      Alert.alert('SOS failed', message);
+    } finally {
+      setSending(false);
+    }
   };
 
   const onRefresh = useCallback(() => {
@@ -97,13 +124,28 @@ export default function SosScreen() {
     >
       <Text style={styles.title}>SOS</Text>
       <Text style={styles.subtitle}>Send an emergency alert and review recent alerts.</Text>
+      {currentUser ? (
+        <Text style={styles.helper}>Logged in as {currentUser.email || currentUser.username} ({currentUser.role})</Text>
+      ) : (
+        <Text style={styles.helper}>Loading resident details...</Text>
+      )}
 
       <View style={styles.heroCard}>
         <Text style={styles.heroTitle}>Need urgent help?</Text>
         <Text style={styles.heroText}>Press the button below to trigger an SOS alert with your current status.</Text>
         <View style={styles.buttonRow}>
-          <Button title={sending ? 'Sending…' : 'Send SOS'} onPress={handleSendSos} disabled={sending} />
+          <View style={styles.buttonWrapper}>
+            <Button title={sending ? 'Sending…' : 'Send SOS'} onPress={handleSendSos} disabled={sending || currentUser?.role?.toUpperCase() !== 'RESIDENT'} />
+          </View>
         </View>
+        {statusMessage ? <Text style={styles.status}>{statusMessage}</Text> : null}
+        {currentUser ? (
+          currentUser?.role?.toUpperCase() !== 'RESIDENT' ? (
+            <Text style={styles.helper}>SOS alerts are available for resident accounts only.</Text>
+          ) : null
+        ) : (
+          <Text style={styles.helper}>Loading user details...</Text>
+        )}
         {sending ? <ActivityIndicator style={styles.loader} /> : null}
       </View>
 
@@ -111,6 +153,7 @@ export default function SosScreen() {
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Recent alerts</Text>
+        <Text style={styles.helper}>Loaded alerts: {events.length}</Text>
         {loading ? (
           <ActivityIndicator style={styles.loader} />
         ) : events.length === 0 ? (
@@ -128,7 +171,9 @@ export default function SosScreen() {
       </View>
 
       <View style={styles.card}>
-        <Button title="Back to dashboard" onPress={() => router.replace('/dashboard')} />
+        <View style={styles.buttonWrapper}>
+          <Button title="Back to dashboard" onPress={() => router.replace('/dashboard')} />
+        </View>
       </View>
     </ScrollView>
   );
@@ -142,12 +187,14 @@ const styles = StyleSheet.create({
   heroTitle: { fontSize: 20, fontWeight: '700', color: '#b42318', marginBottom: 6 },
   heroText: { fontSize: 14, color: '#555', marginBottom: 12 },
   buttonRow: { marginTop: 8 },
+  buttonWrapper: { borderRadius: 12, overflow: 'hidden' },
   loader: { marginTop: 10 },
   card: { backgroundColor: '#fff', borderRadius: 16, padding: 16, marginBottom: 14, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 6, elevation: 2 },
   cardTitle: { fontSize: 17, fontWeight: '700', marginBottom: 10 },
   helper: { color: '#666', marginTop: 4 },
-  error: { color: '#d32f2f', marginBottom: 12 },
-  eventItem: { borderBottomWidth: 1, borderBottomColor: '#f0f0f0', paddingVertical: 10 },
+  status: { color: '#166534', marginBottom: 12, padding: 10, borderRadius: 12, backgroundColor: '#ecfdf5' },
+  error: { color: '#d32f2f', marginBottom: 12, padding: 10, borderRadius: 12, backgroundColor: '#fef2f2' },
+  eventItem: { borderBottomWidth: 1, borderBottomColor: '#f0f0f0', paddingVertical: 12, paddingHorizontal: 8, marginBottom: 8, borderRadius: 12, backgroundColor: '#fafafa' },
   eventStatus: { fontWeight: '700', color: '#b42318' },
   eventMessage: { fontWeight: '600', marginTop: 2 },
 });

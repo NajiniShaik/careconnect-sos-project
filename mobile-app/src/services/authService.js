@@ -1,23 +1,28 @@
-import * as SecureStore from "expo-secure-store";
-import { Platform } from "react-native";
 import { create } from "axios";
 
-export const API_BASE_URL = Platform.select({
-  web: "http://127.0.0.1:8000/api",
-  default: "http://10.0.2.2:8000/api",
-});
+const isWeb = typeof document !== "undefined" && typeof window !== "undefined";
+
+export const API_BASE_URL = isWeb
+  ? "http://127.0.0.1:8000/api"
+  : "http://10.0.2.2:8000/api";
 
 export const api = create({
   baseURL: API_BASE_URL,
   timeout: 15000,
 });
 
+async function getSecureStore() {
+  const { default: SecureStore } = await import("expo-secure-store");
+  return SecureStore;
+}
+
 export async function persistAuth(tokens, user) {
-  if (Platform.OS === "web") {
+  if (isWeb) {
     localStorage.setItem("access", tokens.access);
     localStorage.setItem("refresh", tokens.refresh);
     localStorage.setItem("user", JSON.stringify(user));
   } else {
+    const SecureStore = await getSecureStore();
     await SecureStore.setItemAsync("access", tokens.access);
     await SecureStore.setItemAsync("refresh", tokens.refresh);
     await SecureStore.setItemAsync("user", JSON.stringify(user));
@@ -25,18 +30,26 @@ export async function persistAuth(tokens, user) {
 }
 
 export async function getStoredToken() {
-  if (Platform.OS === "web") {
+  if (isWeb) {
     return localStorage.getItem("access");
   }
+
+  const SecureStore = await getSecureStore();
   return SecureStore.getItemAsync("access");
 }
 
+export async function getAuthHeaders(token = null) {
+  const resolvedToken = token || (await getStoredToken());
+  return resolvedToken ? { Authorization: `Bearer ${resolvedToken}` } : {};
+}
+
 export async function clearAuth() {
-  if (Platform.OS === "web") {
+  if (isWeb) {
     localStorage.removeItem("access");
     localStorage.removeItem("refresh");
     localStorage.removeItem("user");
   } else {
+    const SecureStore = await getSecureStore();
     await SecureStore.deleteItemAsync("access");
     await SecureStore.deleteItemAsync("refresh");
     await SecureStore.deleteItemAsync("user");
@@ -44,11 +57,12 @@ export async function clearAuth() {
 }
 
 export async function getStoredUser() {
-  if (Platform.OS === "web") {
+  if (isWeb) {
     const user = localStorage.getItem("user");
     return user ? JSON.parse(user) : null;
   }
 
+  const SecureStore = await getSecureStore();
   const user = await SecureStore.getItemAsync("user");
   return user ? JSON.parse(user) : null;
 }
