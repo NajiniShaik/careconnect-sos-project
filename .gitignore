@@ -28,3 +28,6 @@ Thumbs.db
 mobile-app/node_modules/
 mobile-app/.expo/
 mobile-app/.claude/
+
+# Personal notes
+copilot_notes.md
