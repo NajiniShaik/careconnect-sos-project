@@ -11,20 +11,22 @@ export default function Modal({
             style={{
                 position: "fixed",
                 inset: 0,
-                background: "rgba(0,0,0,0.4)",
+                background: "rgba(15, 23, 42, 0.45)",
                 display: "flex",
                 justifyContent: "center",
                 alignItems: "center",
                 zIndex: 999,
+                padding: "16px",
             }}
         >
             <div
                 style={{
-                    width: "500px",
+                    width: "100%",
+                    maxWidth: "560px",
                     background: "#fff",
-                    borderRadius: "10px",
-                    padding: "25px",
-                    boxShadow: "0 5px 20px rgba(0,0,0,0.2)",
+                    borderRadius: "18px",
+                    padding: "24px",
+                    boxShadow: "0 20px 45px rgba(15, 23, 42, 0.18)",
                 }}
             >
                 <div
@@ -32,18 +34,22 @@ export default function Modal({
                         display: "flex",
                         justifyContent: "space-between",
                         alignItems: "center",
-                        marginBottom: "20px",
+                        marginBottom: "18px",
                     }}
                 >
-                    <h2>{title}</h2>
+                    <h2 style={{ margin: 0, fontSize: "20px", color: "#0f172a" }}>{title}</h2>
 
                     <button
                         onClick={onClose}
                         style={{
                             border: "none",
-                            background: "transparent",
-                            fontSize: "20px",
+                            background: "#f1f5f9",
+                            borderRadius: "999px",
+                            width: "36px",
+                            height: "36px",
+                            fontSize: "18px",
                             cursor: "pointer",
+                            color: "#475569",
                         }}
                     >
                         ✕

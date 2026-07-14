@@ -35,9 +35,10 @@ export default function EmergencyContactManagement() {
     const [search, setSearch] = useState("");
     const [filter, setFilter] = useState("name");
 
-    const user = JSON.parse(localStorage.getItem("user"));
-    const role = user?.role;
-    console.log(role)
+    const role = localStorage.getItem("role")?.toUpperCase() || "";
+    const canCreateContact = role !== "SECURITY";
+    const canEditDelete = role === "ADMIN" || role === "RESIDENT";
+    const canVerify = role === "ADMIN";
 
     const loadData = async () => {
         try {
@@ -214,86 +215,96 @@ export default function EmergencyContactManagement() {
             />
 
             <AdminLayout>
-
-                <PageTitle
-                    title="Emergency Contact Management"
-                    buttonText={role !== "SECURITY" ? "+ Add Contact" : ""}
-                    onButtonClick={() => {
-                        if (role !== "SECURITY") {
+                <div style={{ background: "var(--surface)", borderRadius: "18px", padding: "20px", border: "1px solid var(--border)", boxShadow: "var(--card-shadow)" }}>
+                    <PageTitle
+                        title="Emergency Contact Management"
+                        buttonText="+ Add Contact"
+                        disabled={!canCreateContact}
+                        onButtonClick={() => {
+                            if (!canCreateContact) return;
                             setEditingContact(null);
                             setOpenModal(true);
-                        }
-                    }}
-                />
+                        }}
+                    />
 
-                <FilterBar
-                    search={search}
-                    setSearch={setSearch}
-                    filter={filter}
-                    setFilter={setFilter}
-                    filterOptions={filterOptions}
-                    placeholder={`Search by ${filter}...`}
-                />
+                    <div style={{ color: "var(--muted)", marginBottom: "12px" }}>Keep resident emergency contacts verified and up to date</div>
 
-                <DataTable
-                    columns={[
-                        "ID",
-                        "Resident_Name",
-                        "Name",
-                        "Phone",
-                        "Relationship",
-                        "Contact_Type",
-                        "Is_Verified",
-                    ]}
-                    data={filteredContacts}
-                    renderCell={(contact, column) => {
+                    <FilterBar
+                        search={search}
+                        setSearch={setSearch}
+                        filter={filter}
+                        setFilter={setFilter}
+                        filterOptions={filterOptions}
+                        placeholder={`Search by ${filter}...`}
+                    />
 
-                        if (column === "Is_Verified") {
-                            return contact.is_verified
-                                ? "✅ Verified"
-                                : "❌ Not Verified";
-                        }
+                    <DataTable
+                        columns={[
+                            "ID",
+                            "Resident_Name",
+                            "Name",
+                            "Phone",
+                            "Relationship",
+                            "Contact_Type",
+                            "Is_Verified",
+                        ]}
+                        data={filteredContacts}
+                        renderCell={(contact, column) => {
 
-                        return contact[column.toLowerCase()];
-                    }}
-                    renderActions={(contact) => (
-                        <>
-                            {(role === "ADMIN" || role === "RESIDENT") && (
-                                <>
-                                    <button
-                                        onClick={() => {
-                                            setEditingContact(contact);
-                                            setOpenModal(true);
-                                        }}
-                                    >
-                                        Edit
-                                    </button>
+                            if (column === "Is_Verified") {
+                                return (
+                                    <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "6px 10px", borderRadius: "999px", background: contact.is_verified ? "rgba(16,185,129,0.08)" : "rgba(217,119,6,0.08)", color: contact.is_verified ? "var(--success)" : "var(--warning)", fontWeight: 700 }}>
+                                        <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: contact.is_verified ? "var(--success)" : "var(--warning)" }} />
+                                        {contact.is_verified ? "Verified" : "Pending"}
+                                    </span>
+                                );
+                            }
 
-                                    <button
-                                        onClick={() => {
-                                            setSelectedContact(contact);
-                                            setDeleteOpen(true);
-                                        }}
-                                    >
-                                        Delete
-                                    </button>
-                                </>
-                            )}
-
-                            {role === "ADMIN" && !contact.is_verified && (
+                            return contact[column.toLowerCase()];
+                        }}
+                        renderActions={(contact) => (
+                            <>
                                 <button
                                     onClick={() => {
-                                        setSelectedContact(contact);
-                                        setVerifyOpen(true);
+                                        if (!canEditDelete) return;
+                                        setEditingContact(contact);
+                                        setOpenModal(true);
                                     }}
+                                    disabled={!canEditDelete}
+                                    style={{ border: "none", background: canEditDelete ? "#eff6ff" : "#e2e8f0", color: canEditDelete ? "#2563eb" : "#64748b", borderRadius: "999px", padding: "8px 12px", marginRight: "8px", cursor: canEditDelete ? "pointer" : "not-allowed", fontWeight: 700, opacity: canEditDelete ? 1 : 0.6 }}
                                 >
-                                    Verify
+                                    Edit
                                 </button>
-                            )}
-                        </>
-                    )}
-                />
 
+                                <button
+                                    onClick={() => {
+                                        if (!canEditDelete) return;
+                                        setSelectedContact(contact);
+                                        setDeleteOpen(true);
+                                    }}
+                                    disabled={!canEditDelete}
+                                    style={{ border: "none", background: canEditDelete ? "#fee2e2" : "#e2e8f0", color: canEditDelete ? "#b91c1c" : "#64748b", borderRadius: "999px", padding: "8px 12px", cursor: canEditDelete ? "pointer" : "not-allowed", fontWeight: 700, opacity: canEditDelete ? 1 : 0.6 }}
+                                >
+                                    Delete
+                                </button>
+
+                                {!contact.is_verified && (
+                                    <button
+                                        onClick={() => {
+                                            if (!canVerify) return;
+                                            setSelectedContact(contact);
+                                            setVerifyOpen(true);
+                                        }}
+                                        disabled={!canVerify}
+                                        style={{ border: "none", background: canVerify ? "#fef3c7" : "#e2e8f0", color: canVerify ? "#92400e" : "#64748b", borderRadius: "999px", padding: "8px 12px", marginLeft: "8px", cursor: canVerify ? "pointer" : "not-allowed", fontWeight: 700, opacity: canVerify ? 1 : 0.6 }}
+                                    >
+                                        Verify
+                                    </button>
+                                )}
+                            </>
+                        )}
+                    />
+                </div>
             </AdminLayout>
 
         </>

@@ -112,101 +112,76 @@ function ResidentForm() {
     return <VerificationPending username={formData.username} />
   }
 
-
   return (
-    <div style={{ maxWidth: "500px", margin: "30px auto" }}>
-      <h2>Resident Registration</h2>
-
+    <div className="auth-form-inner">
+      <h2 className="auth-form-title">Resident Registration</h2>
       <input
+        className="auth-input"
         name="username"
         placeholder="Username"
         onChange={handleChange}
       />
-      <br /><br />
 
       <input
+        className="auth-input"
         name="email"
         type="email"
         placeholder="Email"
         onChange={handleChange}
       />
-      <br /><br />
 
       <input
+        className="auth-input"
         name="password"
         type="password"
         placeholder="Password"
         onChange={handleChange}
       />
-      <br /><br />
 
       <input
+        className="auth-input"
         name="phone"
         placeholder="Phone Number"
         onChange={handleChange}
       />
-      <br /><br />
 
       <select
+        className="auth-select"
         name="society"
         value={formData.society}
         onChange={handleChange}
       >
         <option value="">Select Society</option>
-
         {societies.map((society) => (
-          <option
-            key={society.id}
-            value={society.id}
-          >
-            {society.name}
-          </option>
+          <option key={society.id} value={society.id}>{society.name}</option>
         ))}
       </select>
 
-      <br /><br />
-
       <select
+        className="auth-select"
         name="block"
         value={formData.block}
         onChange={handleChange}
       >
         <option value="">Select Block</option>
-
         {filteredBlocks.map((block) => (
-          <option
-            key={block.id}
-            value={block.id}
-          >
-            {block.name}
-          </option>
+          <option key={block.id} value={block.id}>{block.name}</option>
         ))}
       </select>
 
-      <br /><br />
-
       <select
+        className="auth-select"
         name="flat"
         value={formData.flat}
         onChange={handleChange}
       >
         <option value="">Select Flat</option>
-
         {filteredFlats.map((flat) => (
-          <option
-            key={flat.id}
-            value={flat.id}
-          >
-            {flat.flat_number}
-          </option>
+          <option key={flat.id} value={flat.id}>{flat.flat_number}</option>
         ))}
       </select>
 
-      <br /><br />
-
-      <button onClick={handleRegister}>
-        Register
-      </button>
+      <button className="auth-button" onClick={handleRegister}>Register</button>
     </div>
   );
 }

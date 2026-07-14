@@ -26,9 +26,9 @@ export function normalizeSosEvent(event = {}) {
   return {
     id: event.id,
     status: event.status,
-    message: event.message || 'Emergency alert',
+    message: event.message || event.details || 'Emergency alert',
     location: event.location || 'Location unavailable',
-    created_at: event.created_at || 'Just now',
+    created_at: event.created_at || event.createdAt || 'Just now',
   };
 }
 
@@ -49,20 +49,30 @@ export function mergeSosEvents(createdEvent, history = []) {
 
 export async function triggerSosRequest(payload = buildSosRequestPayload()) {
   const token = await getStoredToken();
+  const headers = await getAuthHeaders(token);
 
   return api.post(
     '/sos/trigger/',
     payload,
     {
-      headers: getAuthHeaders(token),
+      headers,
     }
   );
 }
 
 export async function fetchSosHistory() {
   const token = await getStoredToken();
+  const headers = await getAuthHeaders(token);
 
   return api.get('/sos/trigger/', {
-    headers: getAuthHeaders(token),
+    headers,
   });
+}
+
+export function normalizeSosHistory(events = []) {
+  if (!Array.isArray(events)) {
+    return [];
+  }
+
+  return events.map((event) => normalizeSosEvent(event));
 }

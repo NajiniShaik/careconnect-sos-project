@@ -11,10 +11,13 @@ export default function SearchBar({
       placeholder={placeholder}
       style={{
         width: "300px",
-        padding: "10px",
+        padding: "11px 14px",
         marginBottom: "20px",
-        borderRadius: "8px",
-        border: "1px solid #ccc",
+        borderRadius: "12px",
+        border: "1px solid #cbd5e1",
+        background: "#fff",
+        boxShadow: "0 2px 8px rgba(15, 23, 42, 0.04)",
+        outline: "none",
       }}
     />
   );

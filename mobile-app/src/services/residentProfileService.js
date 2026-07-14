@@ -25,14 +25,14 @@ export function buildResidentProfileViewModel(authUser, residentProfile, emergen
     : [];
 
   return {
-    username: authUser?.username || residentProfile?.username || "N/A",
-    email: authUser?.email || residentProfile?.email || "N/A",
-    phone: authUser?.phone || residentProfile?.phone || "N/A",
+    username: residentProfile?.username || authUser?.username || "N/A",
+    email: residentProfile?.email || authUser?.email || "N/A",
+    phone: residentProfile?.phone || authUser?.phone || "N/A",
     role: authUser?.role || residentProfile?.role || "RESIDENT",
     society: residentProfile?.society_name || residentProfile?.society || "Not available",
     block: residentProfile?.block_name || residentProfile?.block || "Not available",
     flat: residentProfile?.flat_number || residentProfile?.flat || "Not available",
-    approvalStatus: residentProfile?.approval_status || "PENDING",
+    approvalStatus: residentProfile?.approval_status || residentProfile?.approvalStatus || "PENDING",
     emergencyContacts: normalizedContacts,
   };
 }

@@ -9,38 +9,29 @@ function RoleSelector({ selectedRole, setSelectedRole, onNext }) {
   ];
 
   return (
-    <div style={{ maxWidth: "400px", margin: "40px auto" }}>
-      <h2>Select Your Role</h2>
-
-      <select
-        value={selectedRole}
-        onChange={(e) => setSelectedRole(e.target.value)}
-        style={{
-          width: "100%",
-          padding: "10px",
-          marginTop: "20px",
-          marginBottom: "20px",
-        }}
-      >
-        <option value="">-- Select Role --</option>
-
-        {roles.map((role) => (
-          <option key={role} value={role}>
-            {role}
-          </option>
-        ))}
-      </select>
+    <div>
+      <div style={{ marginBottom: "14px" }}>
+        <label style={{ display: "block", marginBottom: "6px", fontWeight: 700, color: "#0f172a" }}>Choose your role</label>
+        <select
+          value={selectedRole}
+          onChange={(e) => setSelectedRole(e.target.value)}
+          className="auth-select"
+        >
+          <option value="">-- Select Role --</option>
+          {roles.map((role) => (
+            <option key={role} value={role}>
+              {role}
+            </option>
+          ))}
+        </select>
+      </div>
 
       <button
         onClick={onNext}
         disabled={!selectedRole}
-        style={{
-          width: "100%",
-          padding: "10px",
-          cursor: selectedRole ? "pointer" : "not-allowed",
-        }}
+        className="auth-button"
       >
-        Next
+        Continue
       </button>
     </div>
   );

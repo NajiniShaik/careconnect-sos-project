@@ -57,54 +57,53 @@ function GuardianForm() {
   }
 
   return (
-    <div style={{ maxWidth: "500px", margin: "30px auto" }}>
-      <h2>Guardian Registration</h2>
-
+    <div className="auth-form-inner">
+      <h2 className="auth-form-title">Guardian Registration</h2>
       <input
+        className="auth-input"
         name="username"
         placeholder="Username"
         onChange={handleChange}
       />
-      <br /><br />
 
       <input
+        className="auth-input"
         name="email"
         type="email"
         placeholder="Email"
         onChange={handleChange}
       />
-      <br /><br />
 
       <input
+        className="auth-input"
         name="password"
         type="password"
         placeholder="Password"
         onChange={handleChange}
       />
-      <br /><br />
 
       <input
+        className="auth-input"
         name="phone"
         placeholder="Phone Number"
         onChange={handleChange}
       />
-      <br /><br />
 
       <input
+        className="auth-input"
         name="resident_name"
         placeholder="Resident Name"
         onChange={handleChange}
       />
-      <br /><br />
 
       <input
+        className="auth-input"
         name="relationship"
         placeholder="Relationship"
         onChange={handleChange}
       />
-      <br /><br />
 
-      <button onClick={handleRegister}>
+      <button className="auth-button" onClick={handleRegister}>
         Register
       </button>
     </div>

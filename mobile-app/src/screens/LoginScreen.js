@@ -1,8 +1,16 @@
 import React, { useState } from "react";
-import { ActivityIndicator, Button, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, StyleSheet, View } from "react-native";
 import { useRouter } from "expo-router";
 import { api, getErrorMessage, persistAuth } from "../services/authService";
 import { getPostLoginRoute } from "../services/navigationService";
+import {
+  AppButton,
+  AppScreen,
+  AppTextInput,
+  PageHeader,
+  SectionCard,
+  StatusBadge,
+} from "../components/common/designSystem";
 
 export default function LoginScreen() {
   const [email, setEmail] = useState("");
@@ -47,67 +55,60 @@ export default function LoginScreen() {
       await persistAuth({ access: res.data.access, refresh: res.data.refresh }, { ...user, ...residentProfile });
       router.replace(getPostLoginRoute(user, { ...residentProfile }));
     } catch (err) {
-      console.log(err.response?.data || err.message);
-      alert(getErrorMessage(err));
+      Alert.alert("Login failed", getErrorMessage(err));
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Welcome back</Text>
-      <Text style={styles.subtitle}>Sign in to your account</Text>
-
-      <TextInput
-        placeholder="Email"
-        value={email}
-        onChangeText={(value) => {
-          setEmail(value);
-          setErrors((prev) => ({ ...prev, email: undefined }));
-        }}
-        style={styles.input}
-        keyboardType="email-address"
-        autoCapitalize="none"
+    <AppScreen background="brand">
+      <PageHeader
+        eyebrow="CareConnect"
+        title="Welcome back"
+        subtitle="Secure sign-in for your community safety portal."
       />
-      {errors.email ? <Text style={styles.error}>{errors.email}</Text> : null}
 
-      <TextInput
-        placeholder="Password"
-        value={password}
-        secureTextEntry
-        onChangeText={(value) => {
-          setPassword(value);
-          setErrors((prev) => ({ ...prev, password: undefined }));
-        }}
-        style={styles.input}
-      />
-      {errors.password ? <Text style={styles.error}>{errors.password}</Text> : null}
+      <SectionCard title="Sign in" subtitle="Use your email and password to continue" style={styles.cardSpacing}>
+        <AppTextInput
+          label="Email address"
+          placeholder="you@example.com"
+          value={email}
+          onChangeText={(value) => {
+            setEmail(value);
+            setErrors((prev) => ({ ...prev, email: undefined }));
+          }}
+          keyboardType="email-address"
+          autoCapitalize="none"
+          error={errors.email}
+        />
 
-      <View style={styles.buttonWrapper}>
-        <Button title={loading ? "Signing in..." : "Login"} onPress={handleLogin} disabled={loading} />
-      </View>
-      {loading ? <ActivityIndicator style={styles.loader} /> : null}
+        <AppTextInput
+          label="Password"
+          placeholder="Enter your password"
+          value={password}
+          secureTextEntry
+          onChangeText={(value) => {
+            setPassword(value);
+            setErrors((prev) => ({ ...prev, password: undefined }));
+          }}
+          error={errors.password}
+        />
 
-      <View style={styles.linkRow}>
-        <Text style={styles.linkText}>New here?</Text>
-        <View style={styles.secondaryButton}>
-          <Button title="Create account" onPress={() => router.push("/register")} />
+        <AppButton title={loading ? "Signing in..." : "Continue"} onPress={handleLogin} loading={loading} />
+        <View style={styles.supportRow}>
+          <StatusBadge label="Encrypted access" tone="success" />
         </View>
-      </View>
-    </View>
+      </SectionCard>
+
+      <SectionCard title="New to CareConnect?" subtitle="Create your account in a few steps." style={styles.cardSpacing}>
+        <AppButton title="Create account" onPress={() => router.push("/register")} variant="secondary" />
+      </SectionCard>
+    </AppScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 20, paddingTop: 80, paddingBottom: 24, flex: 1, justifyContent: "center", backgroundColor: "#f8fafc" },
-  title: { fontSize: 26, fontWeight: "700", marginBottom: 8, color: "#111" },
-  subtitle: { fontSize: 16, marginBottom: 20, color: "#555" },
-  input: { borderWidth: 1, borderColor: "#d1d5db", backgroundColor: "#fff", marginBottom: 10, padding: 12, borderRadius: 12, color: "#111" },
-  error: { color: "#d32f2f", marginBottom: 10 },
-  loader: { marginTop: 14 },
-  linkRow: { marginTop: 24, flexDirection: "row", justifyContent: "center", alignItems: "center" },
-  linkText: { color: "#444", marginRight: 8 },
-  buttonWrapper: { borderRadius: 12, overflow: "hidden", marginTop: 16 },
-  secondaryButton: { borderRadius: 12, overflow: "hidden" },
+  cardSpacing: { marginBottom: 14 },
+  supportRow: { marginTop: 12, alignItems: "flex-start" },
 });

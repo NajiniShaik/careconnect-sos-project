@@ -26,6 +26,8 @@ function SocietyManagement() {
 
 
   const [search, setSearch] = useState("");
+  const role = localStorage.getItem("role")?.toUpperCase() || "";
+  const canManageSocieties = role === "ADMIN";
   const [filter, setFilter] = useState("name");
 
   const loadSocieties = async () => {
@@ -115,19 +117,19 @@ function SocietyManagement() {
       />
 
       <AdminLayout>
-        <div style={{ padding: 30 }}>
+        <div style={{ background: "var(--surface)", borderRadius: "18px", padding: "20px", border: "1px solid var(--border)", boxShadow: "var(--card-shadow)" }}>
           <PageTitle
             title="Society Management"
             buttonText="+ Create Society"
+            disabled={!canManageSocieties}
             onButtonClick={() => {
+              if (!canManageSocieties) return;
               setEditingSociety(null);
               setOpenModal(true);
             }}
           />
 
-          <hr />
-
-          <h3>All Societies</h3>
+          <div style={{ color: "var(--muted)", marginBottom: "12px" }}>All societies in the network</div>
 
           <FilterBar
             search={search}
@@ -139,23 +141,29 @@ function SocietyManagement() {
           />
 
           <DataTable
-            columns={["ID", "Name", "City", "Address",]}
+            columns={["ID", "Name", "City", "Address"]}
             data={filteredSocieties}
             renderActions={(society) => (<>
               <button
                 onClick={() => {
+                  if (!canManageSocieties) return;
                   setEditingSociety(society);
                   setOpenModal(true);
                 }}
+                disabled={!canManageSocieties}
+                style={{ border: "none", background: canManageSocieties ? "rgba(var(--primary-rgb),0.08)" : "var(--border)", color: canManageSocieties ? "var(--info)" : "var(--muted)", borderRadius: "999px", padding: "8px 12px", marginRight: "8px", cursor: canManageSocieties ? "pointer" : "not-allowed", fontWeight: 700, opacity: canManageSocieties ? 1 : 0.6 }}
               >
                 Edit
               </button>
 
               <button
                 onClick={() => {
+                  if (!canManageSocieties) return;
                   setSelectedSociety(society);
                   setDeleteOpen(true);
                 }}
+                disabled={!canManageSocieties}
+                style={{ border: "none", background: canManageSocieties ? "rgba(255,230,230,0.9)" : "var(--border)", color: canManageSocieties ? "var(--danger)" : "var(--muted)", borderRadius: "999px", padding: "8px 12px", cursor: canManageSocieties ? "pointer" : "not-allowed", fontWeight: 700, opacity: canManageSocieties ? 1 : 0.6 }}
               >
                 Delete
               </button>

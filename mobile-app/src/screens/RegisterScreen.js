@@ -1,16 +1,26 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, Button, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import SearchableDropdown from "../components/common/SearchableDropdown";
-import { api, getErrorMessage, persistAuth } from "../services/authService";
+import {
+  AppButton,
+  AppIcon,
+  AppScreen,
+  AppTextInput,
+  PageHeader,
+  SectionCard,
+  StatusBadge,
+  appColors,
+} from "../components/common/designSystem";
+import { api, getAuthHeaders, getErrorMessage, getStoredToken, persistAuth } from "../services/authService";
 import { getRegistrationRequest } from "../services/registrationService";
 
 const roleOptions = [
-  { label: "Resident", value: "RESIDENT" },
-  { label: "Guardian", value: "GUARDIAN" },
-  { label: "Volunteer", value: "VOLUNTEER" },
-  { label: "Security", value: "SECURITY" },
-  { label: "Admin", value: "ADMIN" },
+  { label: "Resident", value: "RESIDENT", icon: "home-outline", description: "Join your society and manage safety access." },
+  { label: "Guardian", value: "GUARDIAN", icon: "people-outline", description: "Support a resident with emergency updates." },
+  { label: "Volunteer", value: "VOLUNTEER", icon: "hand-left-outline", description: "Offer support during local incidents." },
+  { label: "Security", value: "SECURITY", icon: "shield-outline", description: "Coordinate emergency response." },
+  { label: "Admin", value: "ADMIN", icon: "settings-outline", description: "Manage community access and operations." },
 ];
 
 const initialForm = {
@@ -84,10 +94,12 @@ export default function RegisterScreen() {
 
       setLoadingLookups(true);
       try {
+        const token = await getStoredToken();
+        const authHeaders = await getAuthHeaders(token);
         const [societiesRes, blocksRes, flatsRes] = await Promise.all([
-          api.get("/society/societies/"),
-          api.get("/society/blocks/"),
-          api.get("/society/flats/"),
+          api.get("/society/societies/", { headers: authHeaders }),
+          api.get("/society/blocks/", { headers: authHeaders }),
+          api.get("/society/flats/", { headers: authHeaders }),
         ]);
         setSocieties(societiesRes.data || []);
         setBlocks(blocksRes.data || []);
@@ -169,82 +181,72 @@ export default function RegisterScreen() {
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>Create account</Text>
-      <Text style={styles.subtitle}>Register as {role.toLowerCase()}</Text>
+    <AppScreen>
+      <PageHeader
+        eyebrow="Create profile"
+        title="Join CareConnect"
+        subtitle="Register your account and complete your emergency profile."
+      />
 
-      <View style={styles.stepRow}>
-        <Text style={styles.stepIndicator}>Step {step} of 2</Text>
-      </View>
-
-      {step === 1 && (
-        <View>
-          <Text style={styles.label}>Role</Text>
-          {roleOptions.map((option) => (
-            <View key={option.value} style={styles.optionRow}>
-              <Button title={option.label} onPress={() => updateField("role", option.value)} />
-            </View>
-          ))}
-
-          <Text style={styles.label}>Username</Text>
-          <TextInput style={styles.input} value={form.username} onChangeText={(value) => updateField("username", value)} />
-          {errors.username ? <Text style={styles.error}>{errors.username}</Text> : null}
-
-          <Text style={styles.label}>Email</Text>
-          <TextInput style={styles.input} value={form.email} onChangeText={(value) => updateField("email", value)} keyboardType="email-address" autoCapitalize="none" />
-          {errors.email ? <Text style={styles.error}>{errors.email}</Text> : null}
-
-          <Text style={styles.label}>Password</Text>
-          <TextInput style={styles.input} value={form.password} onChangeText={(value) => updateField("password", value)} secureTextEntry />
-          {errors.password ? <Text style={styles.error}>{errors.password}</Text> : null}
-
-          <Text style={styles.label}>Phone</Text>
-          <TextInput style={styles.input} value={form.phone} onChangeText={(value) => updateField("phone", value)} keyboardType="phone-pad" />
-          {errors.phone ? <Text style={styles.error}>{errors.phone}</Text> : null}
-
-          <View style={styles.buttonRow}>
-            <View style={styles.buttonWrapper}>
-              <Button title="Next" onPress={goNext} />
-            </View>
+      <SectionCard title={`Step ${step} of 2`} subtitle={role.toLowerCase()} style={styles.cardSpacing}>
+        <View style={styles.stepBar}>
+          <View style={[styles.stepPill, step === 1 ? styles.stepPillActive : null]}>
+            <Text style={[styles.stepPillText, step === 1 ? styles.stepPillTextActive : null]}>Basic details</Text>
+          </View>
+          <View style={[styles.stepPill, step === 2 ? styles.stepPillActive : null]}>
+            <Text style={[styles.stepPillText, step === 2 ? styles.stepPillTextActive : null]}>Profile details</Text>
           </View>
         </View>
+      </SectionCard>
+
+      {step === 1 && (
+        <SectionCard title="Choose your role" subtitle="Select the role that best describes you" style={styles.cardSpacing}>
+          <View style={styles.roleGrid}>
+            {roleOptions.map((option) => {
+              const selected = form.role === option.value;
+              return (
+                <Pressable
+                  key={option.value}
+                  style={[styles.roleCard, selected && styles.roleCardSelected]}
+                  onPress={() => updateField("role", option.value)}
+                >
+                  <AppIcon name={option.icon} size={20} color={selected ? appColors.blue : appColors.slate} />
+                  <Text style={[styles.roleTitle, selected && styles.roleTitleSelected]}>{option.label}</Text>
+                  <Text style={styles.roleDescription}>{option.description}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          <AppTextInput label="Username" placeholder="Enter a username" value={form.username} onChangeText={(value) => updateField("username", value)} error={errors.username} />
+          <AppTextInput label="Email" placeholder="you@example.com" value={form.email} onChangeText={(value) => updateField("email", value)} keyboardType="email-address" autoCapitalize="none" error={errors.email} />
+          <AppTextInput label="Password" placeholder="Minimum 6 characters" value={form.password} onChangeText={(value) => updateField("password", value)} secureTextEntry error={errors.password} />
+          <AppTextInput label="Phone" placeholder="10-digit contact number" value={form.phone} onChangeText={(value) => updateField("phone", value)} keyboardType="phone-pad" error={errors.phone} />
+
+          <AppButton title="Continue" onPress={goNext} />
+        </SectionCard>
       )}
 
       {step === 2 && (
-        <View>
+        <SectionCard title="Complete your profile" subtitle="Add the details required for your role" style={styles.cardSpacing}>
           {role === "GUARDIAN" && (
             <View>
-              <Text style={styles.label}>Resident name</Text>
-              <TextInput style={styles.input} value={form.resident_name} onChangeText={(value) => updateField("resident_name", value)} />
-              {errors.resident_name ? <Text style={styles.error}>{errors.resident_name}</Text> : null}
-
-              <Text style={styles.label}>Relationship</Text>
-              <TextInput style={styles.input} value={form.relationship} onChangeText={(value) => updateField("relationship", value)} />
-              {errors.relationship ? <Text style={styles.error}>{errors.relationship}</Text> : null}
+              <AppTextInput label="Resident name" placeholder="Name of the resident" value={form.resident_name} onChangeText={(value) => updateField("resident_name", value)} error={errors.resident_name} />
+              <AppTextInput label="Relationship" placeholder="Parent / Spouse / Friend" value={form.relationship} onChangeText={(value) => updateField("relationship", value)} error={errors.relationship} />
             </View>
           )}
 
           {role === "VOLUNTEER" && (
             <View>
-              <Text style={styles.label}>Skills</Text>
-              <TextInput style={styles.input} value={form.skills} onChangeText={(value) => updateField("skills", value)} />
-              {errors.skills ? <Text style={styles.error}>{errors.skills}</Text> : null}
-
-              <Text style={styles.label}>Availability</Text>
-              <TextInput style={styles.input} value={form.availability} onChangeText={(value) => updateField("availability", value)} />
-              {errors.availability ? <Text style={styles.error}>{errors.availability}</Text> : null}
+              <AppTextInput label="Skills" placeholder="First aid, transport, etc." value={form.skills} onChangeText={(value) => updateField("skills", value)} error={errors.skills} />
+              <AppTextInput label="Availability" placeholder="Weekdays evenings" value={form.availability} onChangeText={(value) => updateField("availability", value)} error={errors.availability} />
             </View>
           )}
 
           {role === "SECURITY" && (
             <View>
-              <Text style={styles.label}>Employee ID</Text>
-              <TextInput style={styles.input} value={form.employee_id} onChangeText={(value) => updateField("employee_id", value)} />
-              {errors.employee_id ? <Text style={styles.error}>{errors.employee_id}</Text> : null}
-
-              <Text style={styles.label}>Shift</Text>
-              <TextInput style={styles.input} value={form.shift} onChangeText={(value) => updateField("shift", value)} />
-              {errors.shift ? <Text style={styles.error}>{errors.shift}</Text> : null}
+              <AppTextInput label="Employee ID" placeholder="Enter employee ID" value={form.employee_id} onChangeText={(value) => updateField("employee_id", value)} error={errors.employee_id} />
+              <AppTextInput label="Shift" placeholder="Morning / Evening / Night" value={form.shift} onChangeText={(value) => updateField("shift", value)} error={errors.shift} />
             </View>
           )}
 
@@ -296,38 +298,33 @@ export default function RegisterScreen() {
             </View>
           )}
 
-          {role === "ADMIN" && <Text style={styles.helper}>Admin registration will create a basic user account.</Text>}
+          {role === "ADMIN" && <StatusBadge label="Admin registration creates a basic account" tone="warning" />}
 
           <View style={styles.buttonRow}>
-            <View style={styles.buttonMargin}>
-              <View style={styles.buttonWrapper}>
-                <Button title="Back" onPress={() => setStep(1)} />
-              </View>
-            </View>
-            <View style={styles.buttonWrapper}>
-              <Button title={loading ? "Creating..." : "Create account"} onPress={goNext} disabled={loading} />
-            </View>
+            <AppButton title="Back" onPress={() => setStep(1)} variant="secondary" style={styles.backButton} />
+            <AppButton title={loading ? "Creating..." : "Create account"} onPress={goNext} loading={loading} />
           </View>
-          {loading ? <ActivityIndicator style={styles.loader} /> : null}
-        </View>
+        </SectionCard>
       )}
-    </ScrollView>
+    </AppScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 20, paddingTop: 60, paddingBottom: 80, backgroundColor: "#f8fafc" },
-  title: { fontSize: 26, fontWeight: "700", marginBottom: 8, color: "#111" },
-  subtitle: { fontSize: 16, marginBottom: 20, color: "#555" },
-  stepRow: { marginBottom: 12 },
-  stepIndicator: { color: "#6b7280" },
-  label: { fontWeight: "600", marginBottom: 6, marginTop: 16, color: "#111" },
-  input: { borderWidth: 1, borderColor: "#d1d5db", borderRadius: 12, backgroundColor: "#fff", padding: 12, marginBottom: 8, color: "#111" },
-  error: { color: "#d32f2f", marginTop: 2, marginBottom: 10 },
-  buttonRow: { flexDirection: "row", justifyContent: "space-between", marginTop: 20 },
-  buttonMargin: { flex: 1, marginRight: 12 },
-  buttonWrapper: { flex: 1, borderRadius: 12, overflow: "hidden" },
-  optionRow: { marginBottom: 8 },
-  helper: { color: "#666", marginTop: 8 },
+  cardSpacing: { marginBottom: 14 },
+  stepBar: { flexDirection: "row", gap: 8 },
+  stepPill: { flex: 1, borderRadius: 999, paddingVertical: 8, paddingHorizontal: 12, backgroundColor: "#eff6ff", alignItems: "center" },
+  stepPillActive: { backgroundColor: appColors.blue },
+  stepPillText: { color: appColors.blue, fontSize: 13, fontWeight: "700" },
+  stepPillTextActive: { color: appColors.white },
+  roleGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginBottom: 10 },
+  roleCard: { width: "48%", borderWidth: 1, borderColor: appColors.border, borderRadius: 16, padding: 12, backgroundColor: appColors.white, marginBottom: 10 },
+  roleCardSelected: { borderColor: appColors.blue, backgroundColor: "#eff6ff" },
+  roleTitle: { marginTop: 8, color: appColors.navy, fontWeight: "700" },
+  roleTitleSelected: { color: appColors.blue },
+  roleDescription: { marginTop: 4, color: appColors.muted, fontSize: 12, lineHeight: 18 },
+  buttonRow: { flexDirection: "row", justifyContent: "space-between", marginTop: 16 },
+  backButton: { flex: 0.45, marginRight: 10 },
   loader: { marginTop: 12 },
+  error: { color: appColors.red, marginTop: 6, fontSize: 12 },
 });

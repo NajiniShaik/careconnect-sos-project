@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { FlatList, Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { appColors } from "./designSystem";
 
 export default function SearchableDropdown({
   label,
@@ -90,25 +91,25 @@ export default function SearchableDropdown({
 }
 
 const styles = StyleSheet.create({
-  label: { fontWeight: "600", marginBottom: 6, marginTop: 10 },
+  label: { fontWeight: "700", marginBottom: 6, marginTop: 10, color: appColors.navy },
   selector: {
     borderWidth: 1,
-    borderColor: "#ccc",
-    borderRadius: 8,
-    padding: 12,
+    borderColor: appColors.border,
+    borderRadius: 14,
+    padding: 14,
     marginBottom: 8,
-    backgroundColor: "#fff",
+    backgroundColor: appColors.white,
   },
-  disabledSelector: { backgroundColor: "#f2f2f2" },
-  selectorText: { color: "#111" },
-  optionText: { color: "#111" },
-  modalOverlay: { flex: 1, justifyContent: "center", backgroundColor: "rgba(0,0,0,0.35)" },
-  modalCard: { backgroundColor: "white", margin: 20, borderRadius: 12, padding: 16, maxHeight: "80%" },
-  modalTitle: { fontSize: 18, fontWeight: "700", marginBottom: 10 },
-  input: { borderWidth: 1, borderColor: "#ccc", borderRadius: 8, padding: 10, marginBottom: 10 },
+  disabledSelector: { backgroundColor: "#f8fafc" },
+  selectorText: { color: appColors.navy, fontWeight: "600" },
+  optionText: { color: appColors.navy },
+  modalOverlay: { flex: 1, justifyContent: "center", backgroundColor: "rgba(15, 23, 42, 0.4)" },
+  modalCard: { backgroundColor: appColors.white, margin: 20, borderRadius: 18, padding: 16, maxHeight: "80%" },
+  modalTitle: { fontSize: 18, fontWeight: "800", marginBottom: 10, color: appColors.navy },
+  input: { borderWidth: 1, borderColor: appColors.border, borderRadius: 12, padding: 10, marginBottom: 10, backgroundColor: appColors.white },
   list: { maxHeight: 280 },
-  optionItem: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "#eee" },
-  emptyText: { color: "#666", paddingVertical: 10 },
+  optionItem: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: appColors.border },
+  emptyText: { color: appColors.muted, paddingVertical: 10 },
   closeButton: { marginTop: 10, alignItems: "center", paddingVertical: 10 },
-  closeButtonText: { color: "#0a84ff", fontWeight: "600" },
+  closeButtonText: { color: appColors.blue, fontWeight: "700" },
 });

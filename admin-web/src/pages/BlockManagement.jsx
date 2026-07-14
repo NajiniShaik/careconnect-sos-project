@@ -27,6 +27,9 @@ export default function BlockManagement() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [selectedBlock, setSelectedBlock] = useState(null);
 
+  const role = localStorage.getItem("role")?.toUpperCase() || "";
+  const canManageBlocks = role === "ADMIN";
+
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("name");
 
@@ -135,54 +138,66 @@ export default function BlockManagement() {
       />
 
       <AdminLayout>
-        <PageTitle
-          title="Block Management"
-          buttonText="+ Create Block"
-          onButtonClick={() => {
-            setEditingBlock(null);
-            setOpenModal(true);
-          }}
-        />
+        <div style={{ background: "var(--surface)", borderRadius: "18px", padding: "20px", border: "1px solid var(--border)", boxShadow: "var(--card-shadow)" }}>
+          <PageTitle
+            title="Block Management"
+            buttonText="+ Create Block"
+            disabled={!canManageBlocks}
+            onButtonClick={() => {
+              if (!canManageBlocks) return;
+              setEditingBlock(null);
+              setOpenModal(true);
+            }}
+          />
 
-        <FilterBar
-          search={search}
-          setSearch={setSearch}
-          filter={filter}
-          setFilter={setFilter}
-          filterOptions={filterOptions}
-          placeholder={`Search by ${filter}...`}
-        />
+          <div style={{ color: "var(--muted)", marginBottom: "12px" }}>Track blocks and occupancy at a glance</div>
 
-        <DataTable
-          columns={[
-            "ID",
-            "Name",
-            "Total_Flats",
-            "Society_Name",
-          ]}
-          data={filteredBlocks}
-          renderActions={(block) => (
-            <>
-              <button
-                onClick={() => {
-                  setEditingBlock(block);
-                  setOpenModal(true);
-                }}
-              >
-                Edit
-              </button>
+          <FilterBar
+            search={search}
+            setSearch={setSearch}
+            filter={filter}
+            setFilter={setFilter}
+            filterOptions={filterOptions}
+            placeholder={`Search by ${filter}...`}
+          />
 
-              <button
-                onClick={() => {
-                  setSelectedBlock(block);
-                  setDeleteOpen(true);
-                }}
-              >
-                Delete
-              </button>
-            </>
-          )}
-        />
+          <DataTable
+            columns={[
+              "ID",
+              "Name",
+              "Total_Flats",
+              "Society_Name",
+            ]}
+            data={filteredBlocks}
+            renderActions={(block) => (
+              <>
+                <button
+                  onClick={() => {
+                      if (!canManageBlocks) return;
+                      setEditingBlock(block);
+                      setOpenModal(true);
+                    }}
+                    disabled={!canManageBlocks}
+                    style={{ border: "none", background: canManageBlocks ? "rgba(var(--primary-rgb),0.08)" : "var(--border)", color: canManageBlocks ? "var(--info)" : "var(--muted)", borderRadius: "999px", padding: "8px 12px", marginRight: "8px", cursor: canManageBlocks ? "pointer" : "not-allowed", fontWeight: 700, opacity: canManageBlocks ? 1 : 0.6 }}
+                >
+                  Edit
+                </button>
+
+                <button
+                  onClick={() => {
+                      if (!canManageBlocks) return;
+                      setSelectedBlock(block);
+                      setDeleteOpen(true);
+                    }}
+                    disabled={!canManageBlocks}
+                    style={{ border: "none", background: canManageBlocks ? "rgba(255,230,230,0.9)" : "var(--border)", color: canManageBlocks ? "var(--danger)" : "var(--muted)", borderRadius: "999px", padding: "8px 12px", cursor: canManageBlocks ? "pointer" : "not-allowed", fontWeight: 700, opacity: canManageBlocks ? 1 : 0.6 }}
+                >
+                  Delete
+                </button>
+              </>
+            )}
+          />
+        </div>
       </AdminLayout>
     </>
   );

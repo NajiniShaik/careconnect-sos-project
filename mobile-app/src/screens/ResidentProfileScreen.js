@@ -1,23 +1,22 @@
 import React, { useCallback, useEffect, useState } from "react";
-import {
-  ActivityIndicator,
-  Alert,
-  Button,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { ActivityIndicator, Alert, StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
-import { api, getErrorMessage, getStoredToken, getStoredUser } from "../services/authService";
+import {
+  AppButton,
+  AppScreen,
+  AppTextInput,
+  EmptyState,
+  PageHeader,
+  SectionCard,
+  StatusBadge,
+  appColors,
+} from "../components/common/designSystem";
+import { api, getAuthHeaders, getErrorMessage, getStoredToken, getStoredUser } from "../services/authService";
 import { buildResidentProfileViewModel } from "../services/residentProfileService";
 
 export default function ResidentProfileScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [profile, setProfile] = useState(null);
   const [contactForm, setContactForm] = useState({
@@ -38,10 +37,11 @@ export default function ResidentProfileScreen() {
 
     try {
       const token = await getStoredToken();
+      const authHeaders = await getAuthHeaders(token);
       const storedUser = await getStoredUser();
 
       const residentRes = await api.get("/users/resident-profiles/", {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: authHeaders,
       }).catch((err) => {
         if (err?.response?.status === 403 || err?.response?.status === 401) {
           return { data: [] };
@@ -50,7 +50,7 @@ export default function ResidentProfileScreen() {
       });
 
       const contactsRes = await api.get("/users/emergency-contacts/", {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: authHeaders,
       }).catch((err) => {
         if (err?.response?.status === 403 || err?.response?.status === 401) {
           return { data: [] };
@@ -59,7 +59,7 @@ export default function ResidentProfileScreen() {
       });
 
       const residentList = Array.isArray(residentRes?.data) ? residentRes.data : [];
-      const residentProfile = residentList[0] || null;
+      const residentProfile = residentList.find((item) => String(item?.user?.id || item?.user_id || item?.id) === String(storedUser?.id)) || residentList[0] || null;
       const emergencyContacts = Array.isArray(contactsRes?.data) ? contactsRes.data : [];
       const viewModel = buildResidentProfileViewModel(storedUser, residentProfile, emergencyContacts);
 
@@ -68,7 +68,6 @@ export default function ResidentProfileScreen() {
       setError(getErrorMessage(err));
     } finally {
       if (!isRefresh) setLoading(false);
-      setRefreshing(false);
       setContactSaving(false);
     }
   }, []);
@@ -87,11 +86,6 @@ export default function ResidentProfileScreen() {
     return () => {
       mounted = false;
     };
-  }, [loadProfile]);
-
-  const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    loadProfile(true);
   }, [loadProfile]);
 
   const resetContactForm = () => {
@@ -122,6 +116,7 @@ export default function ResidentProfileScreen() {
 
     try {
       const token = await getStoredToken();
+      const authHeaders = await getAuthHeaders(token);
       const payload = {
         name: contactForm.name.trim(),
         phone: contactForm.phone.trim(),
@@ -131,17 +126,17 @@ export default function ResidentProfileScreen() {
 
       if (editingContactId) {
         await api.patch(`/users/emergency-contacts/${editingContactId}/`, payload, {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: authHeaders,
         });
       } else {
         await api.post("/users/emergency-contacts/", payload, {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: authHeaders,
         });
       }
 
       resetContactForm();
       Alert.alert("Saved", "Emergency contact updated successfully.");
-      loadProfile(true);
+      await loadProfile(true);
     } catch (err) {
       setContactFormError(getErrorMessage(err));
       setContactSaving(false);
@@ -151,11 +146,12 @@ export default function ResidentProfileScreen() {
   const handleDeleteContact = async (contactId) => {
     try {
       const token = await getStoredToken();
+      const authHeaders = await getAuthHeaders(token);
       await api.delete(`/users/emergency-contacts/${contactId}/`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: authHeaders,
       });
       Alert.alert("Removed", "Emergency contact removed.");
-      loadProfile(true);
+      await loadProfile(true);
     } catch (err) {
       Alert.alert("Delete failed", getErrorMessage(err));
     }
@@ -167,11 +163,12 @@ export default function ResidentProfileScreen() {
 
     try {
       const token = await getStoredToken();
+      const authHeaders = await getAuthHeaders(token);
       await api.patch(`/users/emergency-contacts/${contactId}/verify_contact/`, {}, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: authHeaders,
       });
       Alert.alert("Verification sent", "The contact verification request was sent successfully.");
-      loadProfile(true);
+      await loadProfile(true);
     } catch (err) {
       setVerificationError(getErrorMessage(err));
       Alert.alert("Verification failed", getErrorMessage(err));
@@ -182,129 +179,99 @@ export default function ResidentProfileScreen() {
 
   if (loading) {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" />
-        <Text style={styles.helper}>Loading your resident profile…</Text>
-      </View>
+      <AppScreen>
+        <PageHeader eyebrow="Resident profile" title="Loading your profile" subtitle="Please wait while your details are fetched." />
+        <SectionCard title="Preparing your profile" subtitle="This should only take a moment." style={styles.loadingCard}>
+          <ActivityIndicator size="large" color={appColors.blue} />
+          <Text style={styles.helper}>Loading your resident profile…</Text>
+        </SectionCard>
+      </AppScreen>
     );
   }
 
   if (!profile) {
     return (
-      <View style={styles.centered}>
-        <Text style={styles.error}>{error || "No resident profile found."}</Text>
-        <Button title="Retry" onPress={() => loadProfile()} />
-      </View>
+      <AppScreen>
+        <PageHeader eyebrow="Resident profile" title="No resident profile" subtitle="We could not find an active profile for this account." />
+        <SectionCard title="Profile unavailable" subtitle="Check your connection and try again." style={styles.loadingCard}>
+          <Text style={styles.error}>{error || "No resident profile found."}</Text>
+          <AppButton title="Retry" onPress={() => loadProfile()} style={styles.retryButton} />
+        </SectionCard>
+      </AppScreen>
     );
   }
 
   return (
-    <ScrollView
-      contentContainerStyle={styles.container}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-    >
-      <Text style={styles.title}>Resident profile</Text>
-      <Text style={styles.subtitle}>Your account, address, and emergency contacts</Text>
+    <AppScreen>
+      <PageHeader
+        eyebrow="Resident profile"
+        title="Your emergency profile"
+        subtitle="Keep your address, account details, and contacts up to date."
+        action={<StatusBadge label={profile.approvalStatus || "Pending"} tone={profile.approvalStatus === "APPROVED" ? "success" : "warning"} />}
+      />
 
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {error ? <Text style={styles.inlineError}>{error}</Text> : null}
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Personal details</Text>
+      <SectionCard title="Personal details" subtitle="Account information from your session" style={styles.cardSpacing}>
         <DetailRow label="Name" value={profile.username} />
         <DetailRow label="Role" value={profile.role} />
         <DetailRow label="Phone" value={profile.phone} />
         <DetailRow label="Email" value={profile.email} />
-      </View>
+      </SectionCard>
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Residence</Text>
+      <SectionCard title="Residence" subtitle="Your registered society and flat" style={styles.cardSpacing}>
         <DetailRow label="Society" value={profile.society} />
         <DetailRow label="Block / Tower" value={profile.block} />
         <DetailRow label="Flat" value={profile.flat} />
         <DetailRow label="Approval status" value={profile.approvalStatus} />
-      </View>
+      </SectionCard>
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Emergency contacts</Text>
+      <SectionCard title="Emergency contacts" subtitle="Manage trusted people who can be reached quickly" style={styles.cardSpacing}>
         {profile.emergencyContacts.length === 0 ? (
-          <Text style={styles.helper}>No emergency contacts have been added yet.</Text>
+          <EmptyState title="No contacts yet" message="Add a trusted contact to strengthen your emergency support network." icon="people-outline" />
         ) : (
           profile.emergencyContacts.map((contact) => (
             <View key={contact.id || `${contact.name}-${contact.phone}`} style={styles.contactItem}>
-              <Text style={styles.contactName}>{contact.name || "Contact"}</Text>
-              <Text style={styles.helper}>{contact.relationship || "Relationship not provided"}</Text>
-              <Text style={styles.helper}>{contact.phone || "Phone not provided"}</Text>
-              <View style={[styles.badge, styles[`badge${contact.verificationState === "verified" ? "Success" : contact.verificationState === "failed" ? "Danger" : "Warning"}`]]}>
-                <Text style={styles.badgeText}>{contact.verificationLabel}</Text>
+              <View style={styles.contactRow}>
+                <View style={styles.contactMeta}>
+                  <Text style={styles.contactName}>{contact.name || "Contact"}</Text>
+                  <Text style={styles.helper}>{contact.relationship || "Relationship not provided"}</Text>
+                  <Text style={styles.helper}>{contact.phone || "Phone not provided"}</Text>
+                </View>
+                <StatusBadge label={contact.verificationLabel} tone={contact.verificationState === "verified" ? "success" : contact.verificationState === "failed" ? "danger" : "warning"} compact />
               </View>
               {verificationError ? <Text style={styles.error}>{verificationError}</Text> : null}
               <View style={styles.contactActions}>
-                <View style={styles.actionButton}>
-                  <Button title={resendingContactId === contact.id ? "Sending..." : "Resend"} onPress={() => handleResendVerification(contact.id)} disabled={resendingContactId === contact.id} />
-                </View>
-                <View style={styles.actionButton}>
-                  <Button title="Edit" onPress={() => startEditContact(contact)} />
-                </View>
-                <View style={styles.actionButton}>
-                  <Button title="Remove" onPress={() => handleDeleteContact(contact.id)} />
-                </View>
+                <AppButton title={resendingContactId === contact.id ? "Sending..." : "Resend"} onPress={() => handleResendVerification(contact.id)} disabled={resendingContactId === contact.id} variant="secondary" style={styles.contactButton} />
+                <AppButton title="Edit" onPress={() => startEditContact(contact)} variant="secondary" style={styles.contactButton} />
+                <AppButton title="Remove" onPress={() => handleDeleteContact(contact.id)} variant="danger" style={styles.contactButton} />
               </View>
             </View>
           ))
         )}
 
-        <View style={styles.inputRow}>
+        <View style={styles.inputSection}>
           <Text style={styles.label}>{editingContactId ? "Edit contact" : "Add contact"}</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Contact name"
-            value={contactForm.name}
-            onChangeText={(value) => setContactForm((prev) => ({ ...prev, name: value }))}
-          />
-          <TextInput
-            style={styles.input}
-            placeholder="Phone"
-            value={contactForm.phone}
-            onChangeText={(value) => setContactForm((prev) => ({ ...prev, phone: value }))}
-            keyboardType="phone-pad"
-          />
-          <TextInput
-            style={styles.input}
-            placeholder="Relationship"
-            value={contactForm.relationship}
-            onChangeText={(value) => setContactForm((prev) => ({ ...prev, relationship: value }))}
-          />
-          <TextInput
-            style={styles.input}
-            placeholder="Contact type"
-            value={contactForm.contact_type}
-            onChangeText={(value) => setContactForm((prev) => ({ ...prev, contact_type: value }))}
-          />
+          <AppTextInput placeholder="Contact name" value={contactForm.name} onChangeText={(value) => setContactForm((prev) => ({ ...prev, name: value }))} />
+          <AppTextInput placeholder="Phone" value={contactForm.phone} onChangeText={(value) => setContactForm((prev) => ({ ...prev, phone: value }))} keyboardType="phone-pad" />
+          <AppTextInput placeholder="Relationship" value={contactForm.relationship} onChangeText={(value) => setContactForm((prev) => ({ ...prev, relationship: value }))} />
+          <AppTextInput placeholder="Contact type" value={contactForm.contact_type} onChangeText={(value) => setContactForm((prev) => ({ ...prev, contact_type: value }))} />
           {contactFormError ? <Text style={styles.error}>{contactFormError}</Text> : null}
           <View style={styles.contactActions}>
-            <View style={styles.actionButton}>
-              <Button title={contactSaving ? "Saving..." : editingContactId ? "Save changes" : "Add contact"} onPress={handleContactSubmit} disabled={contactSaving} />
-            </View>
-            {editingContactId ? (
-              <View style={styles.actionButton}>
-                <Button title="Cancel" onPress={resetContactForm} />
-              </View>
-            ) : null}
+            <AppButton title={contactSaving ? "Saving..." : editingContactId ? "Save changes" : "Add contact"} onPress={handleContactSubmit} loading={contactSaving} style={styles.contactButton} />
+            {editingContactId ? <AppButton title="Cancel" onPress={resetContactForm} variant="secondary" style={styles.contactButton} /> : null}
           </View>
         </View>
-      </View>
+      </SectionCard>
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Account details</Text>
+      <SectionCard title="Account details" subtitle="Session data shown for reference" style={styles.cardSpacing}>
         <Text style={styles.helper}>Phone and email are shown from the current session, but they are not editable through the backend endpoints available in this project.</Text>
-      </View>
+      </SectionCard>
 
-      <View style={styles.card}>
-        <View style={styles.buttonWrapper}>
-          <Button title="Back to dashboard" onPress={() => router.replace("/dashboard")} />
-        </View>
-      </View>
-    </ScrollView>
+      <SectionCard title="Return home" subtitle="Jump back to your dashboard." style={styles.cardSpacing}>
+        <AppButton title="Back to dashboard" onPress={() => router.replace("/dashboard")} variant="secondary" />
+      </SectionCard>
+    </AppScreen>
   );
 }
 
@@ -318,28 +285,21 @@ function DetailRow({ label, value }) {
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 20, paddingTop: 60, paddingBottom: 80 },
-  centered: { flex: 1, justifyContent: "center", alignItems: "center", padding: 20 },
-  title: { fontSize: 24, fontWeight: "700", marginBottom: 4 },
-  subtitle: { fontSize: 15, color: "#666", marginBottom: 16 },
-  card: { backgroundColor: "#fff", borderRadius: 12, padding: 14, marginBottom: 14, shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 6, elevation: 2 },
-  cardTitle: { fontSize: 17, fontWeight: "700", marginBottom: 10 },
-  row: { flexDirection: "row", justifyContent: "space-between", marginBottom: 8 },
-  rowLabel: { fontWeight: "600", color: "#444" },
-  rowValue: { flex: 1, textAlign: "right", color: "#222" },
-  helper: { color: "#666", marginTop: 6 },
-  error: { color: "#d32f2f", marginTop: 6 },
-  inputRow: { marginTop: 8 },
-  label: { fontWeight: "600", marginBottom: 4 },
-  input: { borderWidth: 1, borderColor: "#d1d5db", borderRadius: 12, padding: 12, marginBottom: 8, backgroundColor: "#fff", color: "#111" },
-  contactItem: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "#f0f0f0" },
-  contactName: { fontWeight: "600", color: "#111" },
-  badge: { alignSelf: "flex-start", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, marginTop: 6 },
-  badgeWarning: { backgroundColor: "#fff4d6" },
-  badgeSuccess: { backgroundColor: "#e8f5e9" },
-  badgeDanger: { backgroundColor: "#fdecea" },
-  badgeText: { fontSize: 12, fontWeight: "700" },
-  contactActions: { flexDirection: "row", flexWrap: "wrap", marginTop: 8, justifyContent: "flex-start" },
-  actionButton: { minWidth: 90, marginBottom: 8, borderRadius: 12, overflow: "hidden", marginRight: 8 },
-  buttonWrapper: { borderRadius: 12, overflow: "hidden" },
+  cardSpacing: { marginBottom: 14 },
+  loadingCard: { alignItems: "center", marginBottom: 14 },
+  retryButton: { marginTop: 12 },
+  row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: appColors.border },
+  rowLabel: { fontWeight: "700", color: appColors.slate },
+  rowValue: { flex: 1, textAlign: "right", color: appColors.navy, marginLeft: 8 },
+  helper: { color: appColors.slate, marginTop: 4, lineHeight: 20 },
+  inlineError: { color: appColors.red, marginBottom: 12 },
+  error: { color: appColors.red, marginTop: 6 },
+  inputSection: { marginTop: 14 },
+  label: { fontWeight: "700", color: appColors.navy, marginBottom: 8 },
+  contactItem: { borderWidth: 1, borderColor: appColors.border, borderRadius: 14, padding: 12, marginTop: 10, backgroundColor: "#fafcff" },
+  contactRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
+  contactMeta: { flex: 1, marginRight: 8 },
+  contactName: { fontWeight: "700", color: appColors.navy, marginBottom: 2 },
+  contactActions: { flexDirection: "row", flexWrap: "wrap", marginTop: 10 },
+  contactButton: { marginRight: 8, marginBottom: 8 },
 });

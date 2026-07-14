@@ -58,28 +58,15 @@ function VolunteerForm() {
   }
 
   return (
-    <div style={{ maxWidth: "500px", margin: "30px auto" }}>
-      <h2>Volunteer Registration</h2>
-
-      <input name="username" placeholder="Username" onChange={handleChange} />
-      <br /><br />
-
-      <input name="email" type="email" placeholder="Email" onChange={handleChange} />
-      <br /><br />
-
-      <input name="password" type="password" placeholder="Password" onChange={handleChange} />
-      <br /><br />
-
-      <input name="phone" placeholder="Phone Number" onChange={handleChange} />
-      <br /><br />
-
-      <input name="skills" placeholder="Skills" onChange={handleChange} />
-      <br /><br />
-
-      <input name="availability" placeholder="Availability" onChange={handleChange} />
-      <br /><br />
-
-      <button onClick={handleRegister}>Register</button>
+    <div className="auth-form-inner">
+      <h2 className="auth-form-title">Volunteer Registration</h2>
+      <input className="auth-input" name="username" placeholder="Username" onChange={handleChange} />
+      <input className="auth-input" name="email" type="email" placeholder="Email" onChange={handleChange} />
+      <input className="auth-input" name="password" type="password" placeholder="Password" onChange={handleChange} />
+      <input className="auth-input" name="phone" placeholder="Phone Number" onChange={handleChange} />
+      <input className="auth-input" name="skills" placeholder="Skills" onChange={handleChange} />
+      <input className="auth-input" name="availability" placeholder="Availability" onChange={handleChange} />
+      <button className="auth-button" onClick={handleRegister}>Register</button>
     </div>
   );
 }

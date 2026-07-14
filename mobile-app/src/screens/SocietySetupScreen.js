@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, Button, FlatList, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, FlatList, Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { useRouter } from "expo-router";
-import { api, getErrorMessage } from "../services/authService";
+import { AppButton, AppScreen, EmptyState, PageHeader, SectionCard, StatusBadge, appColors } from "../components/common/designSystem";
+import { api, getAuthHeaders, getErrorMessage, getStoredToken } from "../services/authService";
 
 export default function SocietySetupScreen() {
   const router = useRouter();
@@ -36,10 +37,12 @@ export default function SocietySetupScreen() {
     setLoading(true);
     setError("");
     try {
+      const token = await getStoredToken();
+      const authHeaders = await getAuthHeaders(token);
       const [societiesRes, blocksRes, flatsRes] = await Promise.all([
-        api.get("/society/societies/"),
-        api.get("/society/blocks/"),
-        api.get("/society/flats/"),
+        api.get("/society/societies/", { headers: authHeaders }),
+        api.get("/society/blocks/", { headers: authHeaders }),
+        api.get("/society/flats/", { headers: authHeaders }),
       ]);
       setSocieties(societiesRes.data || []);
       setBlocks(blocksRes.data || []);
@@ -120,7 +123,7 @@ export default function SocietySetupScreen() {
                 setSearch("");
               }}
             >
-              <Text>{activeModal === "society" ? item.name : activeModal === "block" ? item.name : item.flat_number}</Text>
+              <Text style={styles.optionText}>{activeModal === "society" ? item.name : activeModal === "block" ? item.name : item.flat_number}</Text>
             </Pressable>
           )}
         />
@@ -129,63 +132,82 @@ export default function SocietySetupScreen() {
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>Society setup</Text>
-      <Text style={styles.subtitle}>Choose your society, block, and flat.</Text>
+    <AppScreen>
+      <PageHeader
+        eyebrow="Residence setup"
+        title="Society setup"
+        subtitle="Choose your society, block, and flat in a few taps."
+      />
 
       {loading ? (
-        <ActivityIndicator style={styles.loader} />
+        <SectionCard title="Loading options" subtitle="Fetching available societies and flats" style={styles.cardSpacing}>
+          <ActivityIndicator style={styles.loader} color={appColors.blue} />
+        </SectionCard>
       ) : error ? (
-        <Text style={styles.error}>{error}</Text>
+        <SectionCard title="Could not load options" subtitle="Please retry in a moment." style={styles.cardSpacing}>
+          <Text style={styles.error}>{error}</Text>
+        </SectionCard>
       ) : (
-        <View>
+        <SectionCard title="Choose your address" subtitle="Your current selection will be used for your profile." style={styles.cardSpacing}>
           <Text style={styles.label}>Society</Text>
           <Pressable style={styles.selector} onPress={() => setActiveModal("society")}>
-            <Text>{selectedSociety?.name || "Select society"}</Text>
+            <Text style={styles.selectorText}>{selectedSociety?.name || "Select society"}</Text>
           </Pressable>
 
           <Text style={styles.label}>Block / Tower</Text>
           <Pressable style={styles.selector} onPress={() => setActiveModal("block")} disabled={!selectedSociety}>
-            <Text>{selectedBlock?.name || "Select block"}</Text>
+            <Text style={styles.selectorText}>{selectedBlock?.name || "Select block"}</Text>
           </Pressable>
 
           <Text style={styles.label}>Flat</Text>
           <Pressable style={styles.selector} onPress={() => setActiveModal("flat")} disabled={!selectedBlock}>
-            <Text>{selectedFlat?.flat_number || "Select flat"}</Text>
+            <Text style={styles.selectorText}>{selectedFlat?.flat_number || "Select flat"}</Text>
           </Pressable>
 
-          <View style={styles.buttonRow}>
-            <Button title={submitting ? "Saving..." : "Save selection"} onPress={handleSubmit} disabled={submitting} />
+          <View style={styles.summaryRow}>
+            {selectedSociety ? <StatusBadge label={selectedSociety.name} tone="success" compact /> : null}
+            {selectedBlock ? <StatusBadge label={selectedBlock.name} tone="warning" compact /> : null}
+            {selectedFlat ? <StatusBadge label={selectedFlat.flat_number} tone="neutral" compact /> : null}
           </View>
-        </View>
+
+          <AppButton title={submitting ? "Saving..." : "Save selection"} onPress={handleSubmit} loading={submitting} style={styles.buttonRow} />
+        </SectionCard>
       )}
+
+      {!loading && !error ? (
+        <SectionCard title="Need a different address?" subtitle="You can reopen the selection flow anytime." style={styles.cardSpacing}>
+          <EmptyState title="Ready when you are" message="Changes here only affect the local setup experience in this app." icon="home-outline" />
+        </SectionCard>
+      ) : null}
 
       <Modal visible={Boolean(activeModal)} transparent animationType="slide" onRequestClose={() => setActiveModal(null)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Choose an option</Text>
             {renderOptionList()}
-            <Button title="Close" onPress={() => setActiveModal(null)} />
+            <AppButton title="Close" onPress={() => setActiveModal(null)} variant="secondary" style={styles.closeButton} />
           </View>
         </View>
       </Modal>
-    </ScrollView>
+    </AppScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 20, paddingTop: 60, paddingBottom: 80 },
-  title: { fontSize: 24, fontWeight: "700", marginBottom: 6 },
-  subtitle: { fontSize: 16, color: "#666", marginBottom: 16 },
-  label: { fontWeight: "600", marginTop: 10, marginBottom: 6, color: "#111" },
-  selector: { borderWidth: 1, borderColor: "#d1d5db", borderRadius: 12, padding: 14, marginBottom: 8, backgroundColor: "#fff" },
-  input: { borderWidth: 1, borderColor: "#ccc", borderRadius: 8, padding: 10, marginBottom: 10 },
-  buttonRow: { marginTop: 20 },
-  buttonWrapper: { borderRadius: 12, overflow: "hidden" },
-  loader: { marginTop: 24 },
-  error: { color: "#d32f2f", marginTop: 12 },
-  modalOverlay: { flex: 1, justifyContent: "center", backgroundColor: "rgba(0,0,0,0.35)" },
-  modalCard: { backgroundColor: "white", margin: 20, borderRadius: 12, padding: 16, maxHeight: "80%" },
-  modalTitle: { fontSize: 18, fontWeight: "700", marginBottom: 10 },
-  optionItem: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "#eee" },
+  cardSpacing: { marginBottom: 14 },
+  label: { fontWeight: "700", marginTop: 8, marginBottom: 6, color: appColors.navy },
+  selector: { borderWidth: 1, borderColor: appColors.border, borderRadius: 14, padding: 14, marginBottom: 8, backgroundColor: appColors.white },
+  selectorText: { color: appColors.navy, fontWeight: "600" },
+  input: { borderWidth: 1, borderColor: appColors.border, borderRadius: 12, padding: 12, marginBottom: 10, backgroundColor: appColors.white },
+  buttonRow: { marginTop: 18 },
+  loader: { marginTop: 12 },
+  error: { color: appColors.red, marginTop: 6 },
+  summaryRow: { flexDirection: "row", flexWrap: "wrap", marginTop: 12 },
+  modalOverlay: { flex: 1, justifyContent: "center", backgroundColor: "rgba(15, 23, 42, 0.4)" },
+  modalCard: { backgroundColor: appColors.white, margin: 20, borderRadius: 18, padding: 16, maxHeight: "80%" },
+  modalTitle: { fontSize: 18, fontWeight: "800", marginBottom: 10, color: appColors.navy },
+  modalContent: { flexGrow: 1 },
+  optionItem: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: appColors.border },
+  optionText: { color: appColors.navy, fontWeight: "600" },
+  closeButton: { marginTop: 12 },
 });

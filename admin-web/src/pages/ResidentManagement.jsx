@@ -18,7 +18,6 @@ import DataTable from "../components/common/DataTable";
 import ConfirmDialog from "../components/common/ConfirmDialog";
 import Modal from "../components/common/Modal";
 
-
 import ResidentForm from "../components/admin/ResidentForm";
 
 export default function ResidentManagement() {
@@ -26,6 +25,9 @@ export default function ResidentManagement() {
     const [societies, setSocieties] = useState([]);
 
     const [openModal, setOpenModal] = useState(false);
+
+    const role = localStorage.getItem("role")?.toUpperCase() || "";
+    const canManageResidents = role === "ADMIN";
 
     const [search, setSearch] = useState("");
     const [filter, setFilter] = useState("username");
@@ -141,7 +143,11 @@ export default function ResidentManagement() {
                 <PageTitle
                     title="Resident Management"
                     buttonText="+ Register Resident"
-                    onButtonClick={() => setOpenModal(true)}
+                    disabled={!canManageResidents}
+                    onButtonClick={() => {
+                        if (!canManageResidents) return;
+                        setOpenModal(true);
+                    }}
                 />
 
                 <FilterBar
@@ -166,19 +172,15 @@ export default function ResidentManagement() {
 
                     renderCell={(resident, column) => {
                         if (column === "Approval_Status") {
-                            switch (resident.approval_status) {
-                                case "PENDING":
-                                    return "🟡 Pending";
-
-                                case "APPROVED":
-                                    return "🟢 Approved";
-
-                                case "REJECTED":
-                                    return "🔴 Rejected";
-
-                                default:
-                                    return resident.approval_status;
-                            }
+                            const status = resident.approval_status;
+                            const tone = status === "APPROVED" ? "success" : status === "REJECTED" ? "danger" : "warning";
+                            const label = status === "APPROVED" ? "Approved" : status === "REJECTED" ? "Rejected" : "Pending";
+                            return (
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "6px 10px", borderRadius: "999px", background: tone === "success" ? "rgba(16,185,129,0.08)" : tone === "danger" ? "rgba(220,38,38,0.08)" : "rgba(217,119,6,0.08)", color: tone === "success" ? "var(--success)" : tone === "danger" ? "var(--danger)" : "var(--warning)", fontWeight: 700 }}>
+                                    <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: tone === "success" ? "var(--success)" : tone === "danger" ? "var(--danger)" : "var(--warning)" }} />
+                                    {label}
+                                </span>
+                            );
                         }
 
                         const value = resident[column.toLowerCase()];
@@ -195,9 +197,12 @@ export default function ResidentManagement() {
                             {resident.approval_status !== "APPROVED" && (
                                 <button
                                     onClick={() => {
+                                        if (!canManageResidents) return;
                                         setSelectedResident(resident);
                                         setApproveOpen(true);
                                     }}
+                                    disabled={!canManageResidents}
+                                    style={{ border: "none", background: canManageResidents ? "#dcfce7" : "#e2e8f0", color: canManageResidents ? "#166534" : "#64748b", borderRadius: "999px", padding: "8px 12px", marginRight: "8px", cursor: canManageResidents ? "pointer" : "not-allowed", fontWeight: 700, opacity: canManageResidents ? 1 : 0.6 }}
                                 >
                                     Approve
                                 </button>
@@ -206,9 +211,12 @@ export default function ResidentManagement() {
                             {resident.approval_status !== "REJECTED" && (
                                 <button
                                     onClick={() => {
+                                        if (!canManageResidents) return;
                                         setSelectedResident(resident);
                                         setRejectOpen(true);
                                     }}
+                                    disabled={!canManageResidents}
+                                    style={{ border: "none", background: canManageResidents ? "#fee2e2" : "#e2e8f0", color: canManageResidents ? "#991b1b" : "#64748b", borderRadius: "999px", padding: "8px 12px", cursor: canManageResidents ? "pointer" : "not-allowed", fontWeight: 700, opacity: canManageResidents ? 1 : 0.6 }}
                                 >
                                     Reject
                                 </button>

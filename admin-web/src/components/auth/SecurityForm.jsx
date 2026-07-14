@@ -61,28 +61,15 @@ function SecurityForm() {
   }
 
   return (
-    <div style={{ maxWidth: "500px", margin: "30px auto" }}>
-      <h2>Security Registration</h2>
-
-      <input name="username" placeholder="Username" onChange={handleChange} />
-      <br /><br />
-
-      <input name="email" type="email" placeholder="Email" onChange={handleChange} />
-      <br /><br />
-
-      <input name="password" type="password" placeholder="Password" onChange={handleChange} />
-      <br /><br />
-
-      <input name="phone" placeholder="Phone Number" onChange={handleChange} />
-      <br /><br />
-
-      <input name="employee_id" placeholder="Employee ID" onChange={handleChange} />
-      <br /><br />
-
-      <input name="shift" placeholder="Shift" onChange={handleChange} />
-      <br /><br />
-
-      <button onClick={handleRegister}>Register</button>
+    <div className="auth-form-inner">
+      <h2 className="auth-form-title">Security Registration</h2>
+      <input className="auth-input" name="username" placeholder="Username" onChange={handleChange} />
+      <input className="auth-input" name="email" type="email" placeholder="Email" onChange={handleChange} />
+      <input className="auth-input" name="password" type="password" placeholder="Password" onChange={handleChange} />
+      <input className="auth-input" name="phone" placeholder="Phone Number" onChange={handleChange} />
+      <input className="auth-input" name="employee_id" placeholder="Employee ID" onChange={handleChange} />
+      <input className="auth-input" name="shift" placeholder="Shift" onChange={handleChange} />
+      <button className="auth-button" onClick={handleRegister}>Register</button>
     </div>
   );
 }
