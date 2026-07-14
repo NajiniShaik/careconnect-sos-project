@@ -50,6 +50,20 @@ export const api = create({
 });
 
 api.interceptors.request.use(async (config) => {
+  // Skip auth headers for login and register endpoints
+  const url = config.url || "";
+  const isAuthEndpoint = url.includes("/login/") || url.includes("/register/");
+  
+  if (isAuthEndpoint) {
+    if (__DEV__) {
+      console.log("[auth] request (no auth header)", {
+        method: config.method?.toUpperCase(),
+        url: config.url,
+      });
+    }
+    return config;
+  }
+
   const requestConfig = await buildAuthRequestConfig(config);
 
   if (__DEV__) {
@@ -71,6 +85,7 @@ export async function persistAuth(tokens, user) {
     globalThis.localStorage.setItem("access", accessToken || "");
     globalThis.localStorage.setItem("refresh", refreshToken || "");
     globalThis.localStorage.setItem("user", JSON.stringify(user));
+    globalThis.localStorage.setItem("auth-session-state", "logged-in");
   } else {
     try {
       await SecureStore.setItemAsync("access", accessToken || "");
@@ -96,7 +111,7 @@ export async function persistAuth(tokens, user) {
 }
 
 export async function getStoredToken() {
-  if (cachedAccessToken) {
+  if (cachedAccessToken !== null) {
     return cachedAccessToken;
   }
 
@@ -108,9 +123,17 @@ export async function getStoredToken() {
     let resolvedToken = null;
 
     if (isWebEnvironment()) {
-      resolvedToken = typeof globalThis.localStorage !== "undefined"
-        ? globalThis.localStorage.getItem("access")
+      const sessionState = typeof globalThis.localStorage !== "undefined"
+        ? globalThis.localStorage.getItem("auth-session-state")
         : null;
+
+      if (sessionState === "logged-out") {
+        resolvedToken = null;
+      } else {
+        resolvedToken = typeof globalThis.localStorage !== "undefined"
+          ? globalThis.localStorage.getItem("access")
+          : null;
+      }
     } else {
       try {
         resolvedToken = await SecureStore.getItemAsync("access");
@@ -154,15 +177,26 @@ export async function buildAuthRequestConfig(config = {}) {
 }
 
 export async function clearAuth() {
+  if (__DEV__) {
+    console.log("[auth] clearAuth called, clearing all auth state...");
+  }
+  
   cachedAccessToken = null;
   tokenLoadPromise = null;
 
   if (isWebEnvironment()) {
+    if (__DEV__) {
+      console.log("[auth] Clearing web environment storage...");
+    }
     globalThis.localStorage.removeItem("access");
     globalThis.localStorage.removeItem("refresh");
     globalThis.localStorage.removeItem("user");
+    globalThis.localStorage.setItem("auth-session-state", "logged-out");
   } else {
     try {
+      if (__DEV__) {
+        console.log("[auth] Clearing SecureStore...");
+      }
       await SecureStore.deleteItemAsync("access");
       await SecureStore.deleteItemAsync("refresh");
       await SecureStore.deleteItemAsync("user");
@@ -171,6 +205,10 @@ export async function clearAuth() {
         console.log("[auth] clearAuth failed", { message: error?.message });
       }
     }
+  }
+  
+  if (__DEV__) {
+    console.log("[auth] clearAuth completed");
   }
 }
 

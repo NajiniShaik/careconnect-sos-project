@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Alert, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, StyleSheet, Text, View, Modal, ScrollView, Pressable } from "react-native";
 import { useRouter } from "expo-router";
 import {
   AppButton,
@@ -35,6 +35,10 @@ export default function ResidentProfileScreen({
   const [contactFormError, setContactFormError] = useState("");
   const [verificationError, setVerificationError] = useState("");
   const [resendingContactId, setResendingContactId] = useState(null);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [residentProfiles, setResidentProfiles] = useState([]);
+  const [selectedResidentId, setSelectedResidentId] = useState("");
+  const [residentModalVisible, setResidentModalVisible] = useState(false);
 
   const loadProfile = useCallback(async (isRefresh = false) => {
     if (!isRefresh) setLoading(true);
@@ -44,6 +48,7 @@ export default function ResidentProfileScreen({
       const token = await getStoredToken();
       const authHeaders = await getAuthHeaders(token);
       const storedUser = await getStoredUser();
+      setCurrentUser(storedUser);
 
       const residentRes = await api.get("/users/resident-profiles/", {
         headers: authHeaders,
@@ -64,18 +69,23 @@ export default function ResidentProfileScreen({
       });
 
       const residentList = Array.isArray(residentRes?.data) ? residentRes.data : [];
+      setResidentProfiles(residentList);
+
       const residentProfile = residentList.find((item) => String(item?.user?.id || item?.user_id || item?.id) === String(storedUser?.id)) || residentList[0] || null;
       const emergencyContacts = Array.isArray(contactsRes?.data) ? contactsRes.data : [];
       const viewModel = buildResidentProfileViewModel(storedUser, residentProfile, emergencyContacts);
 
       setProfile(viewModel);
+      if (!selectedResidentId && residentProfile?.id) {
+        setSelectedResidentId(String(residentProfile.id));
+      }
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
       if (!isRefresh) setLoading(false);
       setContactSaving(false);
     }
-  }, []);
+  }, [selectedResidentId]);
 
   useEffect(() => {
     let mounted = true;
@@ -116,6 +126,7 @@ export default function ResidentProfileScreen({
       return;
     }
 
+    const role = (currentUser?.role || profile?.role || "RESIDENT").toUpperCase();
     setContactSaving(true);
     setContactFormError("");
 
@@ -127,7 +138,12 @@ export default function ResidentProfileScreen({
         phone: contactForm.phone.trim(),
         relationship: contactForm.relationship.trim(),
         contact_type: contactForm.contact_type.trim() || "EMERGENCY",
+        is_verified: role === "ADMIN" ? true : false,
       };
+
+      if (role !== "RESIDENT" && selectedResidentId) {
+        payload.resident = Number(selectedResidentId);
+      }
 
       if (editingContactId) {
         await api.patch(`/users/emergency-contacts/${editingContactId}/`, payload, {
@@ -162,6 +178,26 @@ export default function ResidentProfileScreen({
     }
   };
 
+  const handleVerifyContact = async (contactId) => {
+    setVerificationError("");
+    setResendingContactId(contactId);
+
+    try {
+      const token = await getStoredToken();
+      const authHeaders = await getAuthHeaders(token);
+      await api.patch(`/users/emergency-contacts/${contactId}/verify_contact/`, {}, {
+        headers: authHeaders,
+      });
+      Alert.alert("Verified", "The emergency contact was verified successfully.");
+      await loadProfile(true);
+    } catch (err) {
+      setVerificationError(getErrorMessage(err));
+      Alert.alert("Verification failed", getErrorMessage(err));
+    } finally {
+      setResendingContactId(null);
+    }
+  };
+
   const handleMarkPrimary = async (contact) => {
     try {
       const token = await getStoredToken();
@@ -179,24 +215,13 @@ export default function ResidentProfileScreen({
   };
 
   const handleResendVerification = async (contactId) => {
-    setVerificationError("");
-    setResendingContactId(contactId);
-
-    try {
-      const token = await getStoredToken();
-      const authHeaders = await getAuthHeaders(token);
-      await api.patch(`/users/emergency-contacts/${contactId}/verify_contact/`, {}, {
-        headers: authHeaders,
-      });
-      Alert.alert("Verification sent", "The contact verification request was sent successfully.");
-      await loadProfile(true);
-    } catch (err) {
-      setVerificationError(getErrorMessage(err));
-      Alert.alert("Verification failed", getErrorMessage(err));
-    } finally {
-      setResendingContactId(null);
-    }
+    await handleVerifyContact(contactId);
   };
+
+  const role = (currentUser?.role || profile?.role || "RESIDENT").toUpperCase();
+  const canAddContacts = role === "SECURITY" || role === "ADMIN";
+  const canManageOwnContacts = role === "RESIDENT";
+  const canVerifyContacts = role === "ADMIN";
 
   if (loading) {
     return (
@@ -252,7 +277,7 @@ export default function ResidentProfileScreen({
       ) : null}
 
       {showContactManager ? (
-        <SectionCard title="Emergency contacts" subtitle="Manage trusted people who can be reached quickly" style={styles.cardSpacing}>
+        <SectionCard title="Emergency contacts" subtitle={role === "RESIDENT" ? "Manage your trusted contacts" : role === "SECURITY" ? "Add and review emergency contacts for residents" : "Verify and review emergency contacts"} style={styles.cardSpacing}>
           {profile.emergencyContacts.length === 0 ? (
             <EmptyState title="No contacts yet" message="Add a trusted contact to strengthen your emergency support network." icon="people-outline" />
           ) : (
@@ -278,10 +303,18 @@ export default function ResidentProfileScreen({
                   {verificationError ? <Text style={styles.error}>{verificationError}</Text> : null}
 
                   <View style={styles.contactActions}>
-                    <AppButton title={resendingContactId === contact.id ? "Sending..." : "Resend"} onPress={() => handleResendVerification(contact.id)} disabled={resendingContactId === contact.id} variant="secondary" style={styles.contactButton} />
-                    <AppButton title="Edit" onPress={() => startEditContact(contact)} variant="secondary" style={styles.contactButton} />
-                    <AppButton title="Remove" onPress={() => handleDeleteContact(contact.id)} variant="danger" style={styles.contactButton} />
-                    {contact.contact_type !== "PRIMARY_GUARDIAN" ? (
+                    {canVerifyContacts ? (
+                      <AppButton title={resendingContactId === contact.id ? "Verifying..." : "Verify"} onPress={() => handleVerifyContact(contact.id)} disabled={resendingContactId === contact.id} variant="secondary" style={styles.contactButton} />
+                    ) : (
+                      <AppButton title={resendingContactId === contact.id ? "Sending..." : "Resend"} onPress={() => handleResendVerification(contact.id)} disabled={resendingContactId === contact.id} variant="secondary" style={styles.contactButton} />
+                    )}
+                    {canManageOwnContacts ? (
+                      <>
+                        <AppButton title="Edit" onPress={() => startEditContact(contact)} variant="secondary" style={styles.contactButton} />
+                        <AppButton title="Remove" onPress={() => handleDeleteContact(contact.id)} variant="danger" style={styles.contactButton} />
+                      </>
+                    ) : null}
+                    {canManageOwnContacts && contact.contact_type !== "PRIMARY_GUARDIAN" ? (
                       <AppButton title="Make primary" onPress={() => handleMarkPrimary(contact)} variant="secondary" style={styles.contactButton} />
                     ) : null}
                   </View>
@@ -291,7 +324,42 @@ export default function ResidentProfileScreen({
           )}
 
           <View style={styles.inputSection}>
-            <Text style={styles.label}>{editingContactId ? "Edit contact" : "Add contact"}</Text>
+            <Text style={styles.label}>{editingContactId ? "Edit contact" : canAddContacts ? "Add contact for a resident" : "Add contact"}</Text>
+            {canAddContacts ? (
+              <>
+                <Text style={styles.helper}>Choose the resident before adding a new emergency contact.</Text>
+                <Pressable style={styles.selectInput} onPress={() => setResidentModalVisible(true)}>
+                  <Text style={styles.selectInputText}>
+                    {residentProfiles.find((r) => String(r?.id) === selectedResidentId)?.user?.username || "Select resident"}
+                  </Text>
+                </Pressable>
+
+                <Modal visible={residentModalVisible} transparent animationType="slide" onRequestClose={() => setResidentModalVisible(false)}>
+                  <View style={styles.modalOverlay}>
+                    <View style={styles.modalContent}>
+                      <Text style={styles.modalTitle}>Select resident</Text>
+                      <ScrollView>
+                        {residentProfiles.length === 0 ? (
+                          <Text style={styles.helper}>No resident profiles were found for selection.</Text>
+                        ) : (
+                          residentProfiles.map((resident) => {
+                            const residentId = String(resident?.id ?? "");
+                            const residentName = resident?.user?.username || resident?.username || `Resident ${residentId}`;
+
+                            return (
+                              <Pressable key={residentId} onPress={() => { setSelectedResidentId(residentId); setResidentModalVisible(false); }} style={styles.modalItem}>
+                                <Text style={styles.modalItemText}>{residentName}</Text>
+                              </Pressable>
+                            );
+                          })
+                        )}
+                      </ScrollView>
+                      <AppButton title="Close" onPress={() => setResidentModalVisible(false)} variant="secondary" />
+                    </View>
+                  </View>
+                </Modal>
+              </>
+            ) : null}
             <AppTextInput placeholder="Contact name" value={contactForm.name} onChangeText={(value) => setContactForm((prev) => ({ ...prev, name: value }))} />
             <AppTextInput placeholder="Phone" value={contactForm.phone} onChangeText={(value) => setContactForm((prev) => ({ ...prev, phone: value }))} keyboardType="phone-pad" />
             <AppTextInput placeholder="Relationship" value={contactForm.relationship} onChangeText={(value) => setContactForm((prev) => ({ ...prev, relationship: value }))} />
@@ -345,4 +413,16 @@ const styles = StyleSheet.create({
   contactName: { fontWeight: "700", color: appColors.navy },
   contactActions: { flexDirection: "row", flexWrap: "wrap", marginTop: 10 },
   contactButton: { marginRight: 8, marginBottom: 8 },
+  chipRow: { flexDirection: "row", flexWrap: "wrap", marginTop: 8, marginBottom: 8 },
+  chip: { borderWidth: 1, borderColor: appColors.border, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8, marginRight: 8, marginBottom: 8, backgroundColor: appColors.white },
+  chipActive: { borderColor: appColors.blue, backgroundColor: appColors.blue },
+  chipText: { color: appColors.navy, fontWeight: "600" },
+  chipTextActive: { color: appColors.white },
+  selectInput: { borderWidth: 1, borderColor: appColors.border, borderRadius: 8, paddingVertical: 10, paddingHorizontal: 12, marginTop: 8, marginBottom: 8, backgroundColor: appColors.white },
+  selectInputText: { color: appColors.navy },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'center', padding: 20 },
+  modalContent: { backgroundColor: appColors.white, borderRadius: 12, padding: 14, maxHeight: '80%' },
+  modalTitle: { fontWeight: '700', color: appColors.navy, marginBottom: 10 },
+  modalItem: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: appColors.border },
+  modalItemText: { color: appColors.navy },
 });
