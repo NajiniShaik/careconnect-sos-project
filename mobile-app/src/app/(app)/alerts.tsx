@@ -1,170 +1,381 @@
-import React, { useEffect, useState } from "react";
-import { View, Text, StyleSheet } from "react-native";
-import { AppButton, AppScreen, PageHeader, SectionCard, appColors } from "../../components/common/designSystem";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { AppButton, AppScreen, PageHeader, SectionCard, StatusBadge, appColors } from "../../components/common/designSystem";
 import { getStoredUser } from "../../services/authService";
-import { fetchSosHistory, normalizeSosHistory } from "../../services/sosService";
+import { deleteSosAlert, fetchSosAlerts, fetchSosCategories, normalizeSosHistory, resolveSosAlert } from "../../services/sosService";
+
+function normalizeCategoryValue(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function getAlertCategoryValue(alert) {
+  return alert?.category || alert?.category_name || alert?.categoryValue || alert?.category_label || "";
+}
+
+function isAlertOwnedByUser(alert = {}, user = null) {
+  if (!user || !alert) {
+    return false;
+  }
+
+  const residentUsername = String(user?.username || "").trim().toLowerCase();
+  const residentId = String(user?.id || "").trim().toLowerCase();
+  const ownerDetails = alert?.userDetails || {};
+  const ownerValue = String(ownerDetails?.username || ownerDetails?.email || alert?.user || "").trim().toLowerCase();
+  const ownerId = String(ownerDetails?.id || "").trim().toLowerCase();
+
+  return ownerValue === residentUsername || ownerId === residentId;
+}
+
+function getCategoryDisplayName(category, categories = []) {
+  const normalizedCategory = normalizeCategoryValue(category);
+
+  if (!normalizedCategory) {
+    return "Category unavailable";
+  }
+
+  const match = categories.find((item) => normalizeCategoryValue(item.value) === normalizedCategory);
+
+  if (match?.label) {
+    return match.label;
+  }
+
+  return String(category).trim();
+}
+
+function getStatusTone(status) {
+  const normalized = String(status || "").toUpperCase();
+
+  if (normalized === "RESOLVED") {
+    return "success";
+  }
+
+  if (normalized === "OPEN" || normalized === "PENDING") {
+    return "danger";
+  }
+
+  if (normalized === "ACTIVE") {
+    return "warning";
+  }
+
+  return "neutral";
+}
+
+function formatAlertTime(value) {
+  if (!value) {
+    return "Recently created";
+  }
+
+  const dateValue = new Date(value);
+  if (Number.isNaN(dateValue.getTime())) {
+    return value;
+  }
+
+  return dateValue.toLocaleString();
+}
 
 export default function AlertsRoute() {
   const [user, setUser] = useState(null);
   const [alerts, setAlerts] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [selectedCategory, setSelectedCategory] = useState("all");
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [actionLoadingId, setActionLoadingId] = useState(null);
 
-  useEffect(() => {
-    const loadAlerts = async () => {
-      try {
-        const storedUser = await getStoredUser();
-        setUser(storedUser);
+  const loadAlerts = useCallback(async (isRefresh = false) => {
+    if (isRefresh) {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+    }
 
-        const role = String(storedUser?.role || "").toUpperCase();
+    try {
+      const storedUser = await getStoredUser();
+      setUser(storedUser);
 
-        if (role === "RESIDENT") {
-          const response = await fetchSosHistory();
-          const history = normalizeSosHistory(response?.data || []);
-          setAlerts(history);
-        } else {
-          setAlerts([
-            {
-              id: "security-1",
-              title: "Gate A access alert",
-              message: "Security patrol dispatched to Gate A",
-              location: "Gate A",
-              status: "OPEN",
-              created_at: "2 mins ago",
-              category: "Security",
-            },
-            {
-              id: "medical-1",
-              title: "Medical support request",
-              message: "Medical assistance requested near Block 3",
-              location: "Block 3",
-              status: "PENDING",
-              created_at: "10 mins ago",
-              category: "Medical",
-            },
-          ]);
-        }
-      } catch (error) {
-        console.log("[alerts] Failed to load alerts", error);
-        setAlerts([]);
-      } finally {
-        setLoading(false);
-      }
-    };
+      const [alertsResult, categoriesResult] = await Promise.allSettled([
+        fetchSosAlerts(),
+        fetchSosCategories(),
+      ]);
 
-    void loadAlerts();
+      const history = normalizeSosHistory(
+        alertsResult.status === "fulfilled" ? alertsResult.value?.data || [] : []
+      );
+      const categoryList =
+        categoriesResult.status === "fulfilled" && Array.isArray(categoriesResult.value?.data?.categories)
+          ? categoriesResult.value.data.categories
+          : [];
+
+      setAlerts(history);
+      setCategories(categoryList);
+    } catch (error) {
+      console.log("[alerts] Failed to load alerts", error);
+      setAlerts([]);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }, []);
 
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      void loadAlerts();
+    }, 0);
+
+    return () => clearTimeout(timer);
+  }, [loadAlerts]);
+
+  const filteredAlerts = useMemo(() => {
+    if (selectedCategory === "all") {
+      return alerts;
+    }
+
+    return alerts.filter((alert) => normalizeCategoryValue(getAlertCategoryValue(alert)) === normalizeCategoryValue(selectedCategory));
+  }, [alerts, selectedCategory]);
+
+  const categoryLabel = useMemo(() => {
+    if (selectedCategory === "all") {
+      return "All alerts";
+    }
+
+    const match = categories.find((item) => normalizeCategoryValue(item.value) === normalizeCategoryValue(selectedCategory));
+    return match?.label || selectedCategory;
+  }, [categories, selectedCategory]);
+
   const role = String(user?.role || "").toUpperCase();
+  const isAdmin = role === "ADMIN";
+  const isSecurity = role === "SECURITY";
   const isResident = role === "RESIDENT";
-  const isStaff = ["ADMIN", "SECURITY", "GUARDIAN", "VOLUNTEER"].includes(role);
 
-  const getActionLabel = (alert) => {
-    if (isResident) return "View details";
-    if (role === "SECURITY") return "Dispatch";
-    if (role === "ADMIN") return "Escalate";
-    return "Respond";
+  const handleResolveAlert = async (alert) => {
+    if (!alert?.id) {
+      return;
+    }
+
+    Alert.alert("Resolve alert", "Are you sure you want to resolve this alert?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Resolve",
+        onPress: async () => {
+          setActionLoadingId(alert.id);
+          try {
+            await resolveSosAlert(alert.id, "RESOLVED");
+            await loadAlerts(true);
+          } catch (error) {
+            console.log("[alerts] Failed to resolve alert", error);
+            Alert.alert("Unable to resolve", "The alert could not be updated right now.");
+          } finally {
+            setActionLoadingId(null);
+          }
+        },
+      },
+    ]);
   };
 
-  const getActionColor = (alert) => {
-    if (isResident) return "secondary";
-    return "danger";
+  const handleDeleteAlert = async (alert) => {
+    if (!alert?.id) {
+      return;
+    }
+
+    Alert.alert("Delete alert", "This action cannot be undone. Continue?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        onPress: async () => {
+          setActionLoadingId(alert.id);
+          try {
+            await deleteSosAlert(alert.id);
+            setAlerts((prev) => prev.filter((item) => String(item.id) !== String(alert.id)));
+            Alert.alert("Deleted", "The SOS alert was deleted.");
+            await loadAlerts(true);
+          } catch (error) {
+            console.log("[alerts] Failed to delete alert", error);
+            Alert.alert("Unable to delete", "The alert could not be deleted right now.");
+          } finally {
+            setActionLoadingId(null);
+          }
+        },
+      },
+    ]);
   };
+
+  const handleResidentDeleteAlert = async (alert) => {
+    if (!alert?.id) {
+      return;
+    }
+
+    Alert.alert("Delete this SOS alert?", "This action cannot be undone.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+          setActionLoadingId(alert.id);
+          try {
+            await deleteSosAlert(alert.id);
+            setAlerts((prev) => prev.filter((item) => String(item.id) !== String(alert.id)));
+            Alert.alert("Deleted", "The SOS alert was deleted.");
+            await loadAlerts(true);
+          } catch (error) {
+            console.log("[alerts] Failed to delete resident alert", error);
+            Alert.alert("Unable to delete", "The alert could not be deleted right now.");
+          } finally {
+            setActionLoadingId(null);
+          }
+        },
+      },
+    ]);
+  };
+
+  const visibleAlerts = useMemo(() => {
+    if (!isResident) {
+      return filteredAlerts;
+    }
+
+    return filteredAlerts.filter((alert) => isAlertOwnedByUser(alert, user));
+  }, [filteredAlerts, isResident, user]);
 
   return (
-    <AppScreen>
-      <PageHeader eyebrow="Emergency alerts" title="Dispatch center" subtitle="Review urgent updates and community alert status." />
+    <AppScreen scrollable={false}>
+      <View style={styles.screenContent}>
+        <PageHeader eyebrow="Emergency alerts" title="Alerts" subtitle="Browse resident alerts by category." />
 
-      <SectionCard title="Emergency categories" subtitle="Choose a category to see active response details." style={styles.cardSpacing}>
-        <View style={styles.categoryGrid}>
-          {[
-            { label: "Fire", tone: "danger" },
-            { label: "Medical", tone: "success" },
-            { label: "Security", tone: "warning" },
-            { label: "Power", tone: "secondary" },
-          ].map((item) => (
-            <View key={item.label} style={[styles.categoryItem, item.tone === "danger" ? styles.categoryDanger : item.tone === "warning" ? styles.categoryWarning : item.tone === "secondary" ? styles.categorySecondary : styles.categorySuccess]}>
-              <Text style={styles.categoryText}>{item.label}</Text>
-            </View>
-          ))}
-        </View>
-      </SectionCard>
+        <SectionCard title="Categories" subtitle="Choose a category to focus the list." style={styles.cardSpacing}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryRow}>
+            <Pressable
+              style={[styles.categoryChip, selectedCategory === "all" && styles.categoryChipActive]}
+              onPress={() => setSelectedCategory("all")}
+            >
+              <Text style={[styles.categoryChipText, selectedCategory === "all" && styles.categoryChipTextActive]}>All</Text>
+            </Pressable>
 
-      <SectionCard title="Recent alerts" subtitle={isResident ? "Your recent emergency activity" : "Role-based incident actions"} style={styles.cardSpacing}>
-        {loading ? (
-          <Text style={styles.alertDescription}>Loading alerts...</Text>
-        ) : alerts.length === 0 ? (
-          <View style={styles.alertRow}>
-            <Text style={styles.alertTitle}>No recent emergency alerts</Text>
-            <Text style={styles.alertDescription}>Your community has no active incidents at this time.</Text>
-          </View>
-        ) : (
-          alerts.map((alert) => (
-            <View key={alert.id} style={styles.alertRow}>
-              <View style={styles.alertHeaderRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.alertTitle}>{alert.title || alert.message}</Text>
-                  <Text style={styles.alertDescription}>{alert.message}</Text>
-                  <Text style={styles.metaText}>{alert.location} • {alert.status} • {alert.created_at}</Text>
-                </View>
+            {categories.map((item) => {
+              const isActive = normalizeCategoryValue(selectedCategory) === normalizeCategoryValue(item.value);
+
+              return (
+                <Pressable
+                  key={item.value}
+                  style={[styles.categoryChip, isActive && styles.categoryChipActive]}
+                  onPress={() => setSelectedCategory(item.value)}
+                >
+                  <Text style={[styles.categoryChipText, isActive && styles.categoryChipTextActive]}>{item.label}</Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </SectionCard>
+
+        <SectionCard title="Recent alerts" subtitle={categoryLabel} style={styles.cardSpacing}>
+          <ScrollView
+            style={styles.alertList}
+            contentContainerStyle={styles.alertListContent}
+            refreshControl={
+              <RefreshControl refreshing={refreshing} onRefresh={() => void loadAlerts(true)} tintColor={appColors.blue} />
+            }
+            showsVerticalScrollIndicator={false}
+          >
+            {loading && !refreshing ? (
+              <Text style={styles.emptyText}>Loading alerts...</Text>
+            ) : visibleAlerts.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyTitle}>No alerts available for this category.</Text>
+                <Text style={styles.emptyDescription}>Try a different category or pull to refresh.</Text>
               </View>
-              {isStaff ? (
-                <View style={styles.actionRow}>
-                  <AppButton
-                    title={getActionLabel(alert)}
-                    onPress={() => {}}
-                    variant={getActionColor(alert)}
-                    style={styles.actionButton}
-                  />
-                </View>
-              ) : (
-                <View style={styles.actionRow}>
-                  <AppButton
-                    title="View details"
-                    onPress={() => {}}
-                    variant="secondary"
-                    style={styles.actionButton}
-                  />
-                </View>
-              )}
-            </View>
-          ))
-        )}
-      </SectionCard>
+            ) : (
+              visibleAlerts.map((alert) => (
+                <View key={alert.id || `${alert.message}-${alert.created_at}`} style={styles.alertCard}>
+                  <View style={styles.alertHeaderRow}>
+                    <View style={styles.badgeRow}>
+                      <View style={styles.categoryBadge}>
+                        <Text style={styles.categoryBadgeText}>{getCategoryDisplayName(getAlertCategoryValue(alert), categories)}</Text>
+                      </View>
+                      <StatusBadge label={String(alert.status || "OPEN").toUpperCase()} tone={getStatusTone(alert.status)} compact />
+                    </View>
+                  </View>
 
-      <SectionCard title="Society emergency numbers" subtitle="Call local community support if needed." style={styles.cardSpacing}>
-        <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>Society guard</Text>
-          <Text style={styles.detailValue}>+91 98765 43210</Text>
-        </View>
-        <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>Fire brigade</Text>
-          <Text style={styles.detailValue}>101</Text>
-        </View>
-        <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>Police helpline</Text>
-          <Text style={styles.detailValue}>100</Text>
-        </View>
-      </SectionCard>
+                  <Text style={styles.alertMessage}>{alert.message || "Emergency alert"}</Text>
+                  {isSecurity || isAdmin ? (
+                    <View style={styles.userMetaWrap}>
+                      <Text style={styles.metaText}>Resident: {alert.user || "Unknown"}</Text>
+                      {alert.location ? <Text style={styles.metaText}>Location: {alert.location}</Text> : null}
+                    </View>
+                  ) : null}
+                  <Text style={styles.metaText}>{formatAlertTime(alert.created_at)}</Text>
+                  {alert.location && !(isSecurity || isAdmin) ? <Text style={styles.metaText}>{alert.location}</Text> : null}
+                  {isAdmin ? (
+                    <View style={styles.actionRow}>
+                      <AppButton
+                        title={actionLoadingId === alert.id ? "Working..." : "Resolve"}
+                        onPress={() => handleResolveAlert(alert)}
+                        variant="secondary"
+                        style={styles.actionButton}
+                        loading={actionLoadingId === alert.id}
+                      />
+                      <AppButton
+                        title={actionLoadingId === alert.id ? "Working..." : "Delete"}
+                        onPress={() => handleDeleteAlert(alert)}
+                        variant="danger"
+                        style={styles.actionButton}
+                        loading={actionLoadingId === alert.id}
+                      />
+                    </View>
+                  ) : null}
+                  {isResident && isAlertOwnedByUser(alert, user) ? (
+                    <View style={styles.actionRow}>
+                      <AppButton
+                        title={actionLoadingId === alert.id ? "Working..." : "Delete"}
+                        onPress={() => handleResidentDeleteAlert(alert)}
+                        variant="danger"
+                        style={styles.actionButton}
+                        loading={actionLoadingId === alert.id}
+                      />
+                    </View>
+                  ) : null}
+                </View>
+              ))
+            )}
+          </ScrollView>
+        </SectionCard>
+
+        <SectionCard title="Support contacts" subtitle="Reach out for help if needed." style={styles.cardSpacing}>
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>Society guard</Text>
+            <Text style={styles.detailValue}>+91 98765 43210</Text>
+          </View>
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>Emergency helpline</Text>
+            <Text style={styles.detailValue}>112</Text>
+          </View>
+        </SectionCard>
+      </View>
     </AppScreen>
   );
 }
 
 const styles = StyleSheet.create({
+  screenContent: { flex: 1 },
   cardSpacing: { marginBottom: 14 },
-  categoryGrid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", gap: 10 },
-  categoryItem: { width: "48%", borderRadius: 16, padding: 16, minHeight: 90, justifyContent: "center" },
-  categoryText: { color: "#ffffff", fontSize: 15, fontWeight: "700" },
-  categoryDanger: { backgroundColor: "#ef4444" },
-  categoryWarning: { backgroundColor: "#f59e0b" },
-  categorySuccess: { backgroundColor: "#2563eb" },
-  categorySecondary: { backgroundColor: "#475569" },
-  alertRow: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: appColors.border },
-  alertHeaderRow: { flexDirection: "row", alignItems: "flex-start" },
-  alertTitle: { fontSize: 16, fontWeight: "700", color: appColors.navy, marginBottom: 6 },
-  alertDescription: { color: appColors.slate, lineHeight: 20 },
+  categoryRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingRight: 4 },
+  categoryChip: { borderWidth: 1, borderColor: appColors.border, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8, marginRight: 8, backgroundColor: appColors.white },
+  categoryChipActive: { borderColor: appColors.blue, backgroundColor: appColors.blueSoft },
+  categoryChipText: { color: appColors.slate, fontSize: 13, fontWeight: "700" },
+  categoryChipTextActive: { color: appColors.blue },
+  alertList: { maxHeight: 320 },
+  alertListContent: { paddingBottom: 8 },
+  alertCard: { borderWidth: 1, borderColor: appColors.border, borderRadius: 14, padding: 12, marginTop: 10, backgroundColor: "#fafcff" },
+  alertHeaderRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 },
+  badgeRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 },
+  categoryBadge: { borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: appColors.blueSoft },
+  categoryBadgeText: { color: appColors.blue, fontSize: 12, fontWeight: "700" },
+  alertMessage: { color: appColors.navy, fontSize: 15, fontWeight: "700", marginBottom: 6, lineHeight: 20 },
+  userMetaWrap: { marginTop: 4 },
   metaText: { color: appColors.muted, fontSize: 12, marginTop: 4 },
-  actionRow: { marginTop: 10, alignItems: "flex-start" },
-  actionButton: { minWidth: 140 },
+  actionRow: { flexDirection: "row", gap: 8, marginTop: 10 },
+  actionButton: { flex: 1 },
+  emptyState: { paddingVertical: 16, alignItems: "center" },
+  emptyTitle: { color: appColors.navy, fontSize: 15, fontWeight: "700" },
+  emptyDescription: { color: appColors.slate, marginTop: 6, textAlign: "center" },
+  emptyText: { color: appColors.slate, paddingVertical: 8 },
   detailRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: appColors.border },
   detailLabel: { color: appColors.slate },
   detailValue: { color: appColors.navy, fontWeight: "700" },

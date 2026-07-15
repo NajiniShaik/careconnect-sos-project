@@ -7,6 +7,7 @@ const menuItems = [
   { name: "Flats", path: "/flats" },
   { name: "Residents", path: "/residents" },
   { name: "Emergency Contacts", path: "/emergency-contacts" },
+  { name: "Alerts", path: "/alerts" },
 ];
 
 export default function Sidebar() {

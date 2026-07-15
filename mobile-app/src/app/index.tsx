@@ -7,11 +7,11 @@ export default function Home() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const [showLogin, setShowLogin] = useState(false);
+  const forcedLogout = params?.logout === '1' || params?.logout === 'true';
 
   const checkAndNavigate = useCallback(async () => {
     try {
       console.log("[index] Checking auth state...");
-      const forcedLogout = params?.logout === '1' || params?.logout === 'true';
 
       if (forcedLogout) {
         console.log("[index] Forced logout detected, showing login screen");
@@ -20,7 +20,7 @@ export default function Home() {
       }
 
       const token = await getStoredToken();
-      
+
       if (token) {
         console.log("[index] Token found, navigating to dashboard");
         router.replace("/(app)/dashboard");
@@ -32,18 +32,20 @@ export default function Home() {
       console.error("[index] Error checking auth:", error);
       setShowLogin(true);
     }
-  }, [params?.logout, router]);
+  }, [forcedLogout, router]);
 
-  // Initial check on mount
   useEffect(() => {
-    checkAndNavigate();
+    const timer = setTimeout(() => {
+      void checkAndNavigate();
+    }, 0);
+
+    return () => clearTimeout(timer);
   }, [checkAndNavigate]);
 
-  // Re-check when page comes into focus (after logout)
   useFocusEffect(
     useCallback(() => {
       console.log("[index] Page focused, re-checking auth...");
-      checkAndNavigate();
+      void checkAndNavigate();
     }, [checkAndNavigate])
   );
 

@@ -2,22 +2,43 @@ import React, { useEffect, useState } from "react";
 import { Animated, Easing, Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { AppIcon, AppScreen, PageHeader, SectionCard, StatusBadge, appColors } from "../../components/common/designSystem";
 import { getErrorMessage, getStoredUser } from "../../services/authService";
-import { buildSosRequestPayload, triggerSosRequest } from "../../services/sosService";
+import { buildSosRequestPayload, fetchSosCategories, triggerSosRequest } from "../../services/sosService";
 
 export default function Dashboard() {
   const [user, setUser] = useState(null);
   const [sending, setSending] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
   const [sosError, setSosError] = useState("");
+  const [categories, setCategories] = useState([]);
+  const [selectedCategory, setSelectedCategory] = useState("");
+  const [confirmation, setConfirmation] = useState(null);
   const [pulseScale] = useState(new Animated.Value(1));
   const [pulseOpacity] = useState(new Animated.Value(0.35));
 
   useEffect(() => {
     const loadUser = async () => {
-      setUser(await getStoredUser());
+      const storedUser = await getStoredUser();
+      setUser(storedUser);
     };
 
     void loadUser();
+  }, []);
+
+  useEffect(() => {
+    const loadCategories = async () => {
+      try {
+        const response = await fetchSosCategories();
+        const categoryList = Array.isArray(response?.data?.categories) ? response.data.categories : [];
+        setCategories(categoryList);
+        if (categoryList.length > 0) {
+          setSelectedCategory((current) => current || categoryList[0].value);
+        }
+      } catch (error) {
+        console.log("[dashboard] Failed to load SOS categories", error);
+      }
+    };
+
+    void loadCategories();
   }, []);
 
   useEffect(() => {
@@ -62,13 +83,19 @@ export default function Dashboard() {
     setStatusMessage("Sending SOS alert...");
 
     try {
-      const payload = buildSosRequestPayload("Emergency alert triggered from mobile app", "UNKNOWN");
+      const payload = buildSosRequestPayload("Emergency alert triggered from mobile app", locationLabel, selectedCategory);
       const response = await triggerSosRequest(payload);
+      setConfirmation({
+        category: selectedCategory,
+        message: response?.data?.message || "SOS sent successfully.",
+        status: response?.data?.status || "OPEN",
+      });
       setStatusMessage(response?.data?.message || "SOS sent successfully.");
     } catch (err) {
       const message = getErrorMessage(err);
       setSosError(message);
       setStatusMessage(`SOS send failed: ${message}`);
+      setConfirmation(null);
     } finally {
       setSending(false);
     }
@@ -105,7 +132,22 @@ export default function Dashboard() {
         </View>
       </SectionCard>
 
-      <SectionCard title="SOS center" subtitle="Press the button below for urgent help" style={styles.sosCard}>
+      <SectionCard title="SOS center" subtitle="Choose a category, then trigger urgent help" style={styles.sosCard}>
+        <View style={styles.categoryWrap}>
+          {categories.map((item) => {
+            const isSelected = selectedCategory === item.value;
+            return (
+              <Pressable
+                key={item.value}
+                style={[styles.categoryOption, isSelected ? styles.categoryOptionSelected : null]}
+                onPress={() => setSelectedCategory(item.value)}
+              >
+                <Text style={[styles.categoryOptionText, isSelected ? styles.categoryOptionTextSelected : null]}>{item.label}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
         <View style={styles.sosButtonWrap}>
           <Animated.View style={[styles.pulseRing, { transform: [{ scale: pulseScale }], opacity: pulseOpacity }]} />
           <Pressable style={styles.sosButton} onPress={handleSendSos} disabled={sending || user?.role?.toUpperCase() !== "RESIDENT"}>
@@ -113,6 +155,14 @@ export default function Dashboard() {
             <Text style={styles.sosButtonText}>{sending ? "Sending…" : "SOS"}</Text>
           </Pressable>
         </View>
+
+        {confirmation ? (
+          <View style={styles.confirmationBox}>
+            <StatusBadge label="SOS confirmed" tone="success" compact />
+            <Text style={styles.confirmationText}>Prepared for {confirmation.category || "your selected category"}. {confirmation.message}</Text>
+            <Text style={styles.confirmationMeta}>Status: {confirmation.status}</Text>
+          </View>
+        ) : null}
 
         {statusMessage ? (
           <View style={styles.statusWrap}>
@@ -167,10 +217,18 @@ const styles = StyleSheet.create({
   metaText: { color: appColors.slate, marginTop: 6, lineHeight: 20 },
   callButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: appColors.red, justifyContent: "center", alignItems: "center", marginLeft: 12 },
   sosCard: { marginBottom: 14 },
+  categoryWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 14 },
+  categoryOption: { borderWidth: 1, borderColor: appColors.border, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: appColors.white },
+  categoryOptionSelected: { borderColor: appColors.blue, backgroundColor: appColors.blueSoft },
+  categoryOptionText: { color: appColors.slate, fontSize: 13, fontWeight: "700" },
+  categoryOptionTextSelected: { color: appColors.blue },
   sosButtonWrap: { alignItems: "center", justifyContent: "center", paddingVertical: 8 },
   pulseRing: { position: "absolute", width: 188, height: 188, borderRadius: 94, borderWidth: 2, borderColor: appColors.redSoft },
   sosButton: { width: 170, height: 170, borderRadius: 85, backgroundColor: appColors.red, alignItems: "center", justifyContent: "center", shadowColor: appColors.red, shadowOpacity: 0.3, shadowRadius: 16, shadowOffset: { width: 0, height: 10 }, elevation: 8 },
   sosButtonText: { color: appColors.white, fontSize: 20, fontWeight: "800", marginTop: 6 },
+  confirmationBox: { marginTop: 12, padding: 12, borderRadius: 14, backgroundColor: appColors.greenSoft },
+  confirmationText: { color: appColors.navy, marginTop: 8, lineHeight: 20 },
+  confirmationMeta: { color: appColors.muted, marginTop: 4, fontSize: 12 },
   statusWrap: { marginTop: 12 },
   errorText: { color: appColors.red, marginTop: 10, lineHeight: 20 },
   infoCard: { marginBottom: 14 },

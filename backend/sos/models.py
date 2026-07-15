@@ -7,6 +7,7 @@ class SOS(models.Model):
     STATUS_CHOICES = [
         ("OPEN", "Open"),
         ("ACTIVE", "Active"),
+        ("IN_PROGRESS", "In Progress"),
         ("RESOLVED", "Resolved"),
         ("ESCALATED", "Escalated"),
     ]
@@ -19,6 +20,7 @@ class SOS(models.Model):
 
     message = models.TextField(blank=True, null=True)
     location = models.CharField(max_length=255, blank=True, null=True)
+    category = models.CharField(max_length=30, blank=True, null=True)
 
     status = models.CharField(
         max_length=20,

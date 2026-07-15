@@ -9,6 +9,7 @@ import BlockManagement from "./pages/BlockManagement";
 import FlatManagement from "./pages/FlatManagement";
 import ResidentManagement from "./pages/ResidentManagement";
 import EmergencyContactManagement from "./pages/EmergencyContactManagement";
+import AlertsManagement from "./pages/AlertsManagement";
 
 function App() {
   const token = localStorage.getItem("access");
@@ -74,6 +75,14 @@ function App() {
         }
       />
 
+      <Route
+        path="/alerts"
+        element={
+          <ProtectedRoute>
+            <AlertsManagement />
+          </ProtectedRoute>
+        }
+      />
 
       <Route
         path="/dashboard"

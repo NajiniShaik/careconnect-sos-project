@@ -1,9 +1,10 @@
 import { api, getStoredToken, getAuthHeaders } from './authService.js';
 
-export function buildSosRequestPayload(message = 'Emergency alert triggered from mobile app', location = 'UNKNOWN') {
+export function buildSosRequestPayload(message = 'Emergency alert triggered from mobile app', location = 'UNKNOWN', category = '') {
   return {
     message,
     location,
+    ...(category ? { category } : {}),
   };
 }
 
@@ -22,12 +23,31 @@ export function getSosStatusLabel(status) {
   }
 }
 
+function normalizeOwnerValue(owner) {
+  if (!owner) {
+    return '';
+  }
+
+  if (typeof owner === 'string') {
+    return owner;
+  }
+
+  if (typeof owner === 'object') {
+    return owner.username || owner.name || owner.email || owner.id || '';
+  }
+
+  return String(owner);
+}
+
 export function normalizeSosEvent(event = {}) {
   return {
     id: event.id,
     status: event.status,
     message: event.message || event.details || 'Emergency alert',
     location: event.location || 'Location unavailable',
+    user: normalizeOwnerValue(event.user),
+    userDetails: event.user || null,
+    category: event.category || event.category_name || event.categoryValue || event.category_label || '',
     created_at: event.created_at || event.createdAt || 'Just now',
   };
 }
@@ -60,6 +80,10 @@ export async function triggerSosRequest(payload = buildSosRequestPayload()) {
   );
 }
 
+export async function fetchSosCategories() {
+  return api.get('/sos/categories/');
+}
+
 export async function fetchSosHistory() {
   const token = await getStoredToken();
   const headers = await getAuthHeaders(token);
@@ -67,6 +91,29 @@ export async function fetchSosHistory() {
   return api.get('/sos/trigger/', {
     headers,
   });
+}
+
+export async function fetchSosAlerts() {
+  const token = await getStoredToken();
+  const headers = await getAuthHeaders(token);
+
+  return api.get('/sos/alerts/', {
+    headers,
+  });
+}
+
+export async function resolveSosAlert(id, status = 'RESOLVED') {
+  const token = await getStoredToken();
+  const headers = await getAuthHeaders(token);
+
+  return api.patch(`/sos/alerts/${id}/`, { status }, { headers });
+}
+
+export async function deleteSosAlert(id) {
+  const token = await getStoredToken();
+  const headers = await getAuthHeaders(token);
+
+  return api.delete(`/sos/alerts/${id}/`, { headers });
 }
 
 export function normalizeSosHistory(events = []) {
