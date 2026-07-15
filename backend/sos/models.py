@@ -12,6 +12,13 @@ class SOS(models.Model):
         ("ESCALATED", "Escalated"),
     ]
 
+    PRIORITY_CHOICES = [
+        ("LOW", "Low"),
+        ("MEDIUM", "Medium"),
+        ("HIGH", "High"),
+        ("CRITICAL", "Critical"),
+    ]
+
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -32,6 +39,11 @@ class SOS(models.Model):
         max_length=20,
         choices=STATUS_CHOICES,
         default="OPEN"
+    )
+    priority = models.CharField(
+        max_length=20,
+        choices=PRIORITY_CHOICES,
+        default="HIGH"
     )
 
     created_at = models.DateTimeField(auto_now_add=True)

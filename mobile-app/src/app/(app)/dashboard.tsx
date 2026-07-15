@@ -21,6 +21,7 @@ export default function Dashboard() {
   const [sosError, setSosError] = useState("");
   const [categories, setCategories] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState("");
+  const [selectedPriority, setSelectedPriority] = useState("HIGH");
   const [emergencyDescription, setEmergencyDescription] = useState("");
   const [confirmation, setConfirmation] = useState(null);
   const [locationCoordinates, setLocationCoordinates] = useState(null);
@@ -265,7 +266,7 @@ export default function Dashboard() {
       const resolvedMessage = emergencyDescription.trim()
         ? emergencyDescription.trim()
         : "Emergency alert triggered from mobile app";
-      const payload = buildSosRequestPayload(resolvedMessage, locationLabel, selectedCategory, locationCoordinates);
+      const payload = buildSosRequestPayload(resolvedMessage, locationLabel, selectedCategory, locationCoordinates, selectedPriority);
       const response = await triggerSosRequest(payload);
       setConfirmation({
         category: selectedCategory,
@@ -328,6 +329,24 @@ export default function Dashboard() {
               </Pressable>
             );
           })}
+        </View>
+
+        <View style={styles.prioritySection}>
+          <Text style={styles.descriptionLabel}>Priority</Text>
+          <View style={styles.priorityWrap}>
+            {['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'].map((priority) => {
+              const isSelected = selectedPriority === priority;
+              return (
+                <Pressable
+                  key={priority}
+                  style={[styles.priorityOption, isSelected ? styles.priorityOptionSelected : null]}
+                  onPress={() => setSelectedPriority(priority)}
+                >
+                  <Text style={[styles.priorityOptionText, isSelected ? styles.priorityOptionTextSelected : null]}>{priority}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
         </View>
 
         <View style={styles.descriptionSection}>
@@ -472,6 +491,12 @@ const styles = StyleSheet.create({
   categoryOptionSelected: { borderColor: appColors.blue, backgroundColor: appColors.blueSoft },
   categoryOptionText: { color: appColors.slate, fontSize: 13, fontWeight: "700" },
   categoryOptionTextSelected: { color: appColors.blue },
+  prioritySection: { borderWidth: 1, borderColor: appColors.border, borderRadius: 14, padding: 12, marginBottom: 12, backgroundColor: appColors.white },
+  priorityWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 },
+  priorityOption: { borderWidth: 1, borderColor: appColors.border, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: appColors.white },
+  priorityOptionSelected: { borderColor: appColors.blue, backgroundColor: appColors.blueSoft },
+  priorityOptionText: { color: appColors.slate, fontSize: 13, fontWeight: "700" },
+  priorityOptionTextSelected: { color: appColors.blue },
   descriptionSection: { borderWidth: 1, borderColor: appColors.border, borderRadius: 14, padding: 12, marginBottom: 12, backgroundColor: appColors.white },
   descriptionHeaderRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 },
   descriptionLabel: { color: appColors.navy, fontSize: 13, fontWeight: "700" },

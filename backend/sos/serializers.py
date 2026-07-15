@@ -27,6 +27,7 @@ class SOSSerializer(serializers.ModelSerializer):
             "state",
             "country",
             "status",
+            "priority",
             "created_at",
             "updated_at",
         )
@@ -35,7 +36,7 @@ class SOSSerializer(serializers.ModelSerializer):
 class SOSStatusUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = SOS
-        fields = ("status",)
+        fields = ("status", "priority")
 
     def validate_status(self, value):
         if not isinstance(value, str):
@@ -47,11 +48,24 @@ class SOSStatusUpdateSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Status must be one of OPEN, IN_PROGRESS, or RESOLVED")
         return normalized_value
 
+    def validate_priority(self, value):
+        if value is None:
+            return value
+
+        if not isinstance(value, str):
+            raise serializers.ValidationError("Priority must be a string")
+
+        normalized_value = value.upper()
+        allowed_priorities = {"LOW", "MEDIUM", "HIGH", "CRITICAL"}
+        if normalized_value not in allowed_priorities:
+            raise serializers.ValidationError("Priority must be one of LOW, MEDIUM, HIGH, or CRITICAL")
+        return normalized_value
+
 
 class SOSResidentUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = SOS
-        fields = ("message", "latitude", "longitude")
+        fields = ("message", "latitude", "longitude", "priority")
 
     def validate_message(self, value):
         if value is None:
@@ -80,6 +94,19 @@ class SOSResidentUpdateSerializer(serializers.ModelSerializer):
         if not isinstance(value, (int, float)):
             raise serializers.ValidationError("Longitude must be a number")
         return value
+
+    def validate_priority(self, value):
+        if value is None:
+            return value
+
+        if not isinstance(value, str):
+            raise serializers.ValidationError("Priority must be a string")
+
+        normalized_value = value.upper()
+        allowed_priorities = {"LOW", "MEDIUM", "HIGH", "CRITICAL"}
+        if normalized_value not in allowed_priorities:
+            raise serializers.ValidationError("Priority must be one of LOW, MEDIUM, HIGH, or CRITICAL")
+        return normalized_value
 
 
 class SOSMessageSerializer(serializers.ModelSerializer):

@@ -35,12 +35,22 @@ class CreateSOSView(APIView):
         category = request.data.get("category") or request.data.get("category_name") or ""
         latitude = request.data.get("latitude")
         longitude = request.data.get("longitude")
+        priority = request.data.get("priority")
 
         latitude_value = float(latitude) if latitude not in [None, "", " "] else None
         longitude_value = float(longitude) if longitude not in [None, "", " "] else None
 
         geocode_payload = reverse_geocode_coordinates(latitude_value, longitude_value) or {}
         resolved_location = geocode_payload.get("location") or location or ""
+
+        normalized_priority = None
+        if isinstance(priority, str):
+            normalized_priority = priority.upper()
+        elif priority is None:
+            normalized_priority = "HIGH"
+
+        if normalized_priority not in {"LOW", "MEDIUM", "HIGH", "CRITICAL"}:
+            normalized_priority = "HIGH"
 
         sos = SOS.objects.create(
             user=request.user,
@@ -53,7 +63,8 @@ class CreateSOSView(APIView):
             city=geocode_payload.get("city") or None,
             state=geocode_payload.get("state") or None,
             country=geocode_payload.get("country") or None,
-            status="OPEN"
+            status="OPEN",
+            priority=normalized_priority,
         )
 
         return Response({
@@ -68,6 +79,7 @@ class CreateSOSView(APIView):
             "state": sos.state,
             "country": sos.country,
             "location": sos.location,
+            "priority": sos.priority,
         })
     
     def get(self, request):

@@ -7,6 +7,7 @@ test('builds a request payload with default location', async () => {
   assert.deepEqual(payload, {
     message: 'Emergency alert triggered from mobile app',
     location: 'UNKNOWN',
+    priority: 'HIGH',
   });
 });
 
@@ -18,6 +19,7 @@ test('adds latitude and longitude when coordinates are provided', async () => {
     message: 'Emergency alert',
     location: 'Home',
     category: 'medical',
+    priority: 'HIGH',
     latitude: 12.9716,
     longitude: 77.5946,
   });

@@ -58,6 +58,24 @@ class SOSCategoryFlowTests(TestCase):
         saved_sos = SOS.objects.get(user=self.user)
         self.assertEqual(saved_sos.category, "medical")
 
+    def test_sos_creation_defaults_priority_to_high(self):
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/api/sos/trigger/",
+            {
+                "message": "Need urgent help",
+                "location": "Block 3",
+                "category": "medical",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["priority"], "HIGH")
+        saved_sos = SOS.objects.get(user=self.user)
+        self.assertEqual(saved_sos.priority, "HIGH")
+
     def test_sos_creation_accepts_location_coordinates(self):
         self.client.force_authenticate(user=self.user)
 

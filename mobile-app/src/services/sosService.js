@@ -1,10 +1,11 @@
 import { api, getStoredToken, getAuthHeaders } from './authService.js';
 
-export function buildSosRequestPayload(message = 'Emergency alert triggered from mobile app', location = 'UNKNOWN', category = '', coordinates = null) {
+export function buildSosRequestPayload(message = 'Emergency alert triggered from mobile app', location = 'UNKNOWN', category = '', coordinates = null, priority = 'HIGH') {
   const payload = {
     message,
     location,
     ...(category ? { category } : {}),
+    ...(priority ? { priority } : {}),
   };
 
   const hasValidCoordinates =
