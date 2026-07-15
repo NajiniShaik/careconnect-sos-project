@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Alert, StyleSheet, Text, View } from "react-native";
+import * as Location from "expo-location";
 import { useRouter } from "expo-router";
 import {
   AppButton,
@@ -90,8 +91,24 @@ export default function SosScreen() {
     setError("");
     setStatusMessage("Sending SOS alert...");
 
+    let coordinates = null;
+
     try {
-      const payload = buildSosRequestPayload("Emergency alert triggered from mobile app", "UNKNOWN");
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      console.log("[sos] location permission status", status);
+      if (status === "granted") {
+        const currentLocation = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Lowest });
+        coordinates = {
+          latitude: currentLocation?.coords?.latitude,
+          longitude: currentLocation?.coords?.longitude,
+        };
+        console.log("[sos] latitude", coordinates?.latitude ?? null);
+        console.log("[sos] longitude", coordinates?.longitude ?? null);
+      } else {
+        setError("Location permission was not granted, so the SOS will be sent without GPS coordinates.");
+      }
+
+      const payload = buildSosRequestPayload("Emergency alert triggered from mobile app", "UNKNOWN", "", coordinates);
       const response = await triggerSosRequest(payload);
       const createdEvent = normalizeSosEvent(response?.data || {});
       setEvents((prev) => mergeSosEvents(createdEvent, prev));

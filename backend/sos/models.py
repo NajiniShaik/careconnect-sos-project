@@ -21,6 +21,12 @@ class SOS(models.Model):
     message = models.TextField(blank=True, null=True)
     location = models.CharField(max_length=255, blank=True, null=True)
     category = models.CharField(max_length=30, blank=True, null=True)
+    latitude = models.FloatField(blank=True, null=True)
+    longitude = models.FloatField(blank=True, null=True)
+    address = models.CharField(max_length=255, blank=True, null=True)
+    city = models.CharField(max_length=100, blank=True, null=True)
+    state = models.CharField(max_length=100, blank=True, null=True)
+    country = models.CharField(max_length=100, blank=True, null=True)
 
     status = models.CharField(
         max_length=20,
@@ -33,3 +39,16 @@ class SOS(models.Model):
 
     def __str__(self):
         return f"SOS({self.user.username}) - {self.status}"
+
+
+class SOSMessage(models.Model):
+    sos = models.ForeignKey(SOS, on_delete=models.CASCADE, related_name="messages")
+    sender = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="sos_messages")
+    message = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("created_at", "id")
+
+    def __str__(self):
+        return f"SOSMessage({self.sos_id}) - {self.sender.username}"

@@ -10,6 +10,19 @@ test('builds a request payload with default location', async () => {
   });
 });
 
+test('adds latitude and longitude when coordinates are provided', async () => {
+  const { buildSosRequestPayload } = await import('./sosService.js');
+  const payload = buildSosRequestPayload('Emergency alert', 'Home', 'medical', { latitude: 12.9716, longitude: 77.5946 });
+
+  assert.deepEqual(payload, {
+    message: 'Emergency alert',
+    location: 'Home',
+    category: 'medical',
+    latitude: 12.9716,
+    longitude: 77.5946,
+  });
+});
+
 test('maps status strings to readable labels', async () => {
   const { getSosStatusLabel } = await import('./sosService.js');
   assert.equal(getSosStatusLabel('PENDING'), 'Pending');

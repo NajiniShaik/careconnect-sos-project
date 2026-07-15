@@ -47,7 +47,7 @@ function Spinner() {
 export default function AlertsManagement() {
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [notification, setNotification] = useState(null);
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("All");
   const [statusFilter, setStatusFilter] = useState("All");
@@ -74,10 +74,10 @@ export default function AlertsManagement() {
     try {
       const response = await getSosAlerts();
       setAlerts(Array.isArray(response?.data) ? response.data : []);
-      setError("");
+      setNotification(null);
     } catch (err) {
       console.error("Failed to load alerts", err);
-      setError("Unable to load SOS alerts right now.");
+      setNotification({ type: "error", message: "Unable to load SOS alerts right now." });
       setAlerts([]);
     } finally {
       setLoading(false);
@@ -143,12 +143,14 @@ export default function AlertsManagement() {
 
     setPage(1);
     setActionLoadingId(alert.id);
+    setNotification(null);
     try {
       await resolveSosAlert(alert.id, "RESOLVED");
       await loadAlerts(true);
+      setNotification({ type: "success", message: "Alert resolved successfully." });
     } catch (err) {
       console.error("Failed to resolve alert", err);
-      setError("Unable to resolve this alert.");
+      setNotification({ type: "error", message: "Unable to resolve this alert." });
     } finally {
       setActionLoadingId(null);
     }
@@ -179,12 +181,14 @@ export default function AlertsManagement() {
 
     setPage(1);
     setActionLoadingId(alert.id);
+    setNotification(null);
     try {
       await deleteSosAlert(alert.id);
       await loadAlerts(true);
+      setNotification({ type: "success", message: "Alert deleted successfully." });
     } catch (err) {
       console.error("Failed to delete alert", err);
-      setError("Unable to delete this alert.");
+      setNotification({ type: "error", message: "Unable to delete this alert." });
     } finally {
       setActionLoadingId(null);
     }
@@ -279,11 +283,22 @@ export default function AlertsManagement() {
           </div>
         </div>
 
-        {error ? (
-          <div style={{ background: "#fef2f2", border: "1px solid #fecaca", color: "#991b1b", borderRadius: "14px", padding: "14px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
-            <span>{error}</span>
-            <button onClick={() => void loadAlerts(true)} style={{ border: "none", background: "#dc2626", color: "white", borderRadius: "999px", padding: "8px 12px", cursor: "pointer", fontWeight: 700 }}>
-              Retry
+        {notification ? (
+          <div style={{
+            background: notification.type === "error" ? "#fef2f2" : "#f0fdf4",
+            border: `1px solid ${notification.type === "error" ? "#fecaca" : "#bbf7d0"}`,
+            color: notification.type === "error" ? "#991b1b" : "#166534",
+            borderRadius: "14px",
+            padding: "14px",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: "12px",
+            flexWrap: "wrap",
+          }}>
+            <span>{notification.message}</span>
+            <button onClick={() => void loadAlerts(true)} style={{ border: "none", background: notification.type === "error" ? "#dc2626" : "#16a34a", color: "white", borderRadius: "999px", padding: "8px 12px", cursor: "pointer", fontWeight: 700 }}>
+              {notification.type === "error" ? "Retry" : "Refresh"}
             </button>
           </div>
         ) : null}
@@ -363,7 +378,7 @@ export default function AlertsManagement() {
           )}
         </div>
 
-        {!loading && !error && filteredAlerts.length > 0 ? (
+        {!loading && !notification && filteredAlerts.length > 0 ? (
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap", padding: "0 4px" }}>
             <div style={{ color: "#64748b", fontSize: "13px" }}>
               Showing {Math.min((page - 1) * 10 + 1, filteredAlerts.length)}–{Math.min(page * 10, filteredAlerts.length)} of {filteredAlerts.length} alerts

@@ -1,8 +1,18 @@
-import React, { useEffect, useState } from "react";
-import { Animated, Easing, Linking, Pressable, StyleSheet, Text, View } from "react-native";
+import React, { useEffect, useState, useRef } from "react";
+import { Animated, Easing, Linking, NativeEventEmitter, NativeModules, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import * as Location from "expo-location";
 import { AppIcon, AppScreen, PageHeader, SectionCard, StatusBadge, appColors } from "../../components/common/designSystem";
 import { getErrorMessage, getStoredUser } from "../../services/authService";
 import { buildSosRequestPayload, fetchSosCategories, triggerSosRequest } from "../../services/sosService";
+
+let MapView = null;
+let Marker = null;
+
+if (Platform.OS !== "web") {
+  // The map package is only used on native platforms to avoid the web runtime crash.
+  MapView = null;
+  Marker = null;
+}
 
 export default function Dashboard() {
   const [user, setUser] = useState(null);
@@ -11,9 +21,19 @@ export default function Dashboard() {
   const [sosError, setSosError] = useState("");
   const [categories, setCategories] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState("");
+  const [emergencyDescription, setEmergencyDescription] = useState("");
   const [confirmation, setConfirmation] = useState(null);
+  const [locationCoordinates, setLocationCoordinates] = useState(null);
+  const [locationStatus, setLocationStatus] = useState("idle");
+  const [refreshingLocation, setRefreshingLocation] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [voiceError, setVoiceError] = useState("");
   const [pulseScale] = useState(new Animated.Value(1));
   const [pulseOpacity] = useState(new Animated.Value(0.35));
+  const srModuleRef = useRef(null);
+  const srSubscriptionsRef = useRef([]);
+
+  // Voice event listeners are attached dynamically when the native module is available.
 
   useEffect(() => {
     const loadUser = async () => {
@@ -68,6 +88,165 @@ export default function Dashboard() {
     setUser(await getStoredUser());
   };
 
+  const loadCurrentLocation = async (forceRefresh = false) => {
+    if (forceRefresh) {
+      setRefreshingLocation(true);
+    }
+
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      console.log("[sos] location permission status", status);
+
+      if (status !== "granted") {
+        setLocationCoordinates(null);
+        setLocationStatus("unavailable");
+        return null;
+      }
+
+      const currentLocation = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Lowest });
+      const nextCoordinates = {
+        latitude: currentLocation?.coords?.latitude,
+        longitude: currentLocation?.coords?.longitude,
+      };
+
+      if (
+        typeof nextCoordinates.latitude === "number" &&
+        typeof nextCoordinates.longitude === "number" &&
+        Number.isFinite(nextCoordinates.latitude) &&
+        Number.isFinite(nextCoordinates.longitude)
+      ) {
+        setLocationCoordinates(nextCoordinates);
+        setLocationStatus("available");
+        return nextCoordinates;
+      }
+
+      setLocationCoordinates(null);
+      setLocationStatus("unavailable");
+      return null;
+    } catch (error) {
+      console.log("[dashboard] Failed to fetch current location", error);
+      setLocationCoordinates(null);
+      setLocationStatus("unavailable");
+      return null;
+    } finally {
+      setRefreshingLocation(false);
+    }
+  };
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const initializeLocation = async () => {
+      if (user?.role?.toUpperCase() === "RESIDENT") {
+        const coordinates = await loadCurrentLocation(false);
+        if (!isMounted) {
+          return;
+        }
+
+        if (!coordinates) {
+          setLocationCoordinates(null);
+          setLocationStatus("unavailable");
+        }
+      }
+    };
+
+    void initializeLocation();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [user?.role]);
+
+  const handleVoiceInput = async () => {
+    if (Platform.OS === "web") {
+      setVoiceError("Voice input unavailable.");
+      return;
+    }
+
+    // If already listening, stop and cleanup
+    if (isListening) {
+      try {
+        const mod = srModuleRef.current;
+        if (mod?.stop) mod.stop();
+      } catch (error) {
+        console.log("[dashboard] Failed to stop voice input", error);
+      }
+      // remove listeners
+      srSubscriptionsRef.current.forEach((s) => s.remove && s.remove());
+      srSubscriptionsRef.current = [];
+      setIsListening(false);
+      return;
+    }
+
+    // Try to load the native module at the time of use so app startup doesn't fail
+    let srPackage;
+    try {
+      // dynamic import so Metro doesn't attempt to load native module at startup
+      srPackage = await import("expo-speech-recognition");
+    } catch (err) {
+      console.log("[dashboard] Speech recognition module not available", err);
+      setVoiceError("Voice input unavailable.");
+      return;
+    }
+
+    const mod = srPackage?.ExpoSpeechRecognitionModule || NativeModules.ExpoSpeechRecognition;
+    if (!mod) {
+      setVoiceError("Voice input unavailable.");
+      return;
+    }
+
+    srModuleRef.current = mod;
+
+    try {
+      const permission = await mod.requestPermissionsAsync();
+      if (!permission?.granted) {
+        setVoiceError("Voice input unavailable.");
+        return;
+      }
+
+      setVoiceError("");
+      setIsListening(true);
+
+      // Attach event listeners using NativeEventEmitter
+      try {
+        const emitter = new NativeEventEmitter(mod);
+
+        const resultSub = emitter.addListener("result", (event) => {
+          const transcriptText = event?.results?.[0]?.transcript || "";
+          if (transcriptText) {
+            setEmergencyDescription((current) => `${current}${current ? " " : ""}${transcriptText}`.slice(0, 500));
+          }
+        });
+
+        const endSub = emitter.addListener("end", () => {
+          setIsListening(false);
+          // cleanup
+          srSubscriptionsRef.current.forEach((s) => s.remove && s.remove());
+          srSubscriptionsRef.current = [];
+        });
+
+        const errorSub = emitter.addListener("error", () => {
+          setVoiceError("Voice input unavailable.");
+          setIsListening(false);
+          srSubscriptionsRef.current.forEach((s) => s.remove && s.remove());
+          srSubscriptionsRef.current = [];
+        });
+
+        srSubscriptionsRef.current = [resultSub, endSub, errorSub];
+      } catch (err) {
+        // If adding event listeners fails, continue but rely on stop callbacks
+        console.log("[dashboard] failed to attach speech listeners", err);
+      }
+
+      // Start recognition
+      mod.start({ lang: "en-US", interimResults: true, continuous: false });
+    } catch (error) {
+      console.log("[dashboard] Voice input failed", error);
+      setVoiceError("Voice input unavailable.");
+      setIsListening(false);
+    }
+  };
+
   const handleSendSos = async () => {
     const role = user?.role?.toUpperCase();
 
@@ -83,7 +262,10 @@ export default function Dashboard() {
     setStatusMessage("Sending SOS alert...");
 
     try {
-      const payload = buildSosRequestPayload("Emergency alert triggered from mobile app", locationLabel, selectedCategory);
+      const resolvedMessage = emergencyDescription.trim()
+        ? emergencyDescription.trim()
+        : "Emergency alert triggered from mobile app";
+      const payload = buildSosRequestPayload(resolvedMessage, locationLabel, selectedCategory, locationCoordinates);
       const response = await triggerSosRequest(payload);
       setConfirmation({
         category: selectedCategory,
@@ -146,6 +328,74 @@ export default function Dashboard() {
               </Pressable>
             );
           })}
+        </View>
+
+        <View style={styles.descriptionSection}>
+          <View style={styles.descriptionHeaderRow}>
+            <Text style={styles.descriptionLabel}>Emergency Description</Text>
+            <Pressable
+              style={[styles.voiceButton, styles.voiceButtonDisabled]}
+              disabled
+              onPress={() => void handleVoiceInput()}
+            >
+              <AppIcon name="mic-off-outline" size={16} color={appColors.muted} />
+            </Pressable>
+          </View>
+          <TextInput
+            style={styles.descriptionInput}
+            placeholder="Describe your emergency..."
+            placeholderTextColor={appColors.muted}
+            value={emergencyDescription}
+            onChangeText={(value) => setEmergencyDescription(value.slice(0, 500))}
+            multiline
+            maxLength={500}
+            textAlignVertical="top"
+          />
+          <View style={styles.descriptionFooterRow}>
+            <Text style={styles.voiceStatusText}>{isListening ? "Listening..." : voiceError || ""}</Text>
+            <Text style={styles.descriptionCounter}>{emergencyDescription.length}/500</Text>
+          </View>
+        </View>
+
+        <View style={styles.locationPreviewCard}>
+          <View style={styles.locationPreviewHeader}>
+            <Text style={styles.locationPreviewLabel}>Current Location</Text>
+            <Pressable style={styles.refreshLocationButton} onPress={() => void loadCurrentLocation(true)} disabled={refreshingLocation}>
+              <Text style={styles.refreshLocationText}>{refreshingLocation ? "Refreshing..." : "Refresh Location"}</Text>
+            </Pressable>
+          </View>
+
+          {locationStatus === "available" && locationCoordinates ? (
+            <View style={styles.locationPreviewContent}>
+              {Platform.OS !== "web" && MapView && Marker ? (
+                <MapView
+                  style={styles.locationPreviewMap}
+                  region={{
+                    latitude: locationCoordinates.latitude,
+                    longitude: locationCoordinates.longitude,
+                    latitudeDelta: 0.01,
+                    longitudeDelta: 0.01,
+                  }}
+                  scrollEnabled={false}
+                  zoomEnabled={false}
+                >
+                  <Marker coordinate={locationCoordinates} />
+                </MapView>
+              ) : (
+                <View style={styles.locationPreviewFallback}>
+                  <Text style={styles.locationPreviewFallbackText}>Map preview unavailable on web.</Text>
+                </View>
+              )}
+              <View style={styles.locationPreviewDetails}>
+                <Text style={styles.locationPreviewDetailLabel}>Latitude</Text>
+                <Text style={styles.locationPreviewDetailValue}>{locationCoordinates.latitude.toFixed(6)}</Text>
+                <Text style={styles.locationPreviewDetailLabel}>Longitude</Text>
+                <Text style={styles.locationPreviewDetailValue}>{locationCoordinates.longitude.toFixed(6)}</Text>
+              </View>
+            </View>
+          ) : (
+            <Text style={styles.locationPreviewUnavailable}>Location unavailable.</Text>
+          )}
         </View>
 
         <View style={styles.sosButtonWrap}>
@@ -222,6 +472,29 @@ const styles = StyleSheet.create({
   categoryOptionSelected: { borderColor: appColors.blue, backgroundColor: appColors.blueSoft },
   categoryOptionText: { color: appColors.slate, fontSize: 13, fontWeight: "700" },
   categoryOptionTextSelected: { color: appColors.blue },
+  descriptionSection: { borderWidth: 1, borderColor: appColors.border, borderRadius: 14, padding: 12, marginBottom: 12, backgroundColor: appColors.white },
+  descriptionHeaderRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 },
+  descriptionLabel: { color: appColors.navy, fontSize: 13, fontWeight: "700" },
+  voiceButton: { width: 34, height: 34, borderRadius: 17, backgroundColor: appColors.blueSoft, justifyContent: "center", alignItems: "center" },
+  voiceButtonDisabled: { backgroundColor: appColors.grayLight, opacity: 0.65 },
+  voiceButtonActive: { backgroundColor: appColors.red, borderWidth: 1, borderColor: appColors.redSoft },
+  descriptionInput: { borderWidth: 1, borderColor: appColors.border, borderRadius: 12, minHeight: 96, paddingHorizontal: 12, paddingVertical: 10, color: appColors.navy, fontSize: 14, backgroundColor: appColors.white },
+  descriptionFooterRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 6 },
+  voiceStatusText: { color: appColors.red, fontSize: 12, flex: 1 },
+  descriptionCounter: { color: appColors.muted, fontSize: 12, marginTop: 6, textAlign: "right" },
+  locationPreviewCard: { borderWidth: 1, borderColor: appColors.border, borderRadius: 14, padding: 12, marginBottom: 12, backgroundColor: appColors.white },
+  locationPreviewHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
+  locationPreviewLabel: { color: appColors.navy, fontSize: 13, fontWeight: "700" },
+  refreshLocationButton: { borderRadius: 999, backgroundColor: appColors.blueSoft, paddingHorizontal: 10, paddingVertical: 6 },
+  refreshLocationText: { color: appColors.blue, fontSize: 12, fontWeight: "700" },
+  locationPreviewContent: { flexDirection: "row", gap: 10, alignItems: "center" },
+  locationPreviewMap: { width: 140, height: 100, borderRadius: 10, overflow: "hidden" },
+  locationPreviewFallback: { width: 140, height: 100, borderRadius: 10, backgroundColor: appColors.blueSoft, justifyContent: "center", alignItems: "center", padding: 10 },
+  locationPreviewFallbackText: { color: appColors.blue, fontSize: 12, fontWeight: "700", textAlign: "center" },
+  locationPreviewDetails: { flex: 1 },
+  locationPreviewDetailLabel: { color: appColors.muted, fontSize: 12, marginTop: 4 },
+  locationPreviewDetailValue: { color: appColors.navy, fontSize: 14, fontWeight: "700", marginBottom: 4 },
+  locationPreviewUnavailable: { color: appColors.slate, fontSize: 13 },
   sosButtonWrap: { alignItems: "center", justifyContent: "center", paddingVertical: 8 },
   pulseRing: { position: "absolute", width: 188, height: 188, borderRadius: 94, borderWidth: 2, borderColor: appColors.redSoft },
   sosButton: { width: 170, height: 170, borderRadius: 85, backgroundColor: appColors.red, alignItems: "center", justifyContent: "center", shadowColor: appColors.red, shadowOpacity: 0.3, shadowRadius: 16, shadowOffset: { width: 0, height: 10 }, elevation: 8 },
