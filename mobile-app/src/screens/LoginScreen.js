@@ -42,7 +42,11 @@ export default function LoginScreen() {
     setLoading(true);
     try {
       const res = await api.post("/users/login/", { email, password });
+      console.log("[login] response", res.data);
       const user = res.data?.user;
+      const accessToken = res.data?.access;
+      const refreshToken = res.data?.refresh;
+      console.log("[login] extracted token", { accessToken, refreshToken });
       const residentSetupComplete = Boolean(user?.society && user?.block && user?.flat);
       const residentProfile = user?.role === "RESIDENT"
         ? {
@@ -52,7 +56,8 @@ export default function LoginScreen() {
             residentSetupComplete,
           }
         : { residentSetupComplete };
-      await persistAuth({ access: res.data.access, refresh: res.data.refresh }, { ...user, ...residentProfile });
+      await persistAuth({ access: accessToken, refresh: refreshToken }, { ...user, ...residentProfile });
+      console.log("[login] persistAuth completed, navigating to dashboard");
       router.replace(getPostLoginRoute(user, { ...residentProfile }));
     } catch (err) {
       Alert.alert("Login failed", getErrorMessage(err));

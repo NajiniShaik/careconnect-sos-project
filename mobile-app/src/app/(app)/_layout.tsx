@@ -1,7 +1,29 @@
-import { Tabs } from "expo-router";
+import { Tabs, useFocusEffect, useRouter } from "expo-router";
+import { useCallback, useEffect } from "react";
 import { AppIcon, appColors } from "../../components/common/designSystem";
+import { getStoredToken } from "../../services/authService";
 
 export default function AppLayout() {
+  const router = useRouter();
+
+  const verifyAuth = useCallback(async () => {
+    const token = await getStoredToken();
+    console.log("[layout] verifyAuth", { hasToken: Boolean(token) });
+    if (!token) {
+      router.replace("/");
+    }
+  }, [router]);
+
+  useEffect(() => {
+    void verifyAuth();
+  }, [verifyAuth]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void verifyAuth();
+    }, [verifyAuth])
+  );
+
   return (
     <Tabs
       screenOptions={{

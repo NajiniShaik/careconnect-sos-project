@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
-import { Animated, Easing, Linking, NativeEventEmitter, NativeModules, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Animated, Easing, Image, Linking, NativeEventEmitter, NativeModules, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import * as Location from "expo-location";
 import { AppIcon, AppScreen, PageHeader, SectionCard, StatusBadge, appColors } from "../../components/common/designSystem";
 import { getErrorMessage, getStoredUser } from "../../services/authService";
@@ -9,9 +9,16 @@ let MapView = null;
 let Marker = null;
 
 if (Platform.OS !== "web") {
-  // The map package is only used on native platforms to avoid the web runtime crash.
-  MapView = null;
-  Marker = null;
+  // Load native map components lazily so web bundling doesn't try to resolve the native module.
+  try {
+    const maps = require("react-native-maps");
+    MapView = maps?.default || maps?.MapView || null;
+    Marker = maps?.Marker || null;
+  } catch (error) {
+    console.log("[dashboard] react-native-maps unavailable", error);
+    MapView = null;
+    Marker = null;
+  }
 }
 
 export default function Dashboard() {
@@ -401,8 +408,14 @@ export default function Dashboard() {
                   <Marker coordinate={locationCoordinates} />
                 </MapView>
               ) : (
-                <View style={styles.locationPreviewFallback}>
-                  <Text style={styles.locationPreviewFallbackText}>Map preview unavailable on web.</Text>
+                <View style={styles.locationPreviewMap}>
+                  <Image
+                    source={{
+                      uri: `https://staticmap.openstreetmap.de/staticmap.php?center=${locationCoordinates.latitude},${locationCoordinates.longitude}&zoom=15&size=300x200&markers=${locationCoordinates.latitude},${locationCoordinates.longitude},red-pushpin`,
+                    }}
+                    style={styles.locationPreviewMap}
+                    resizeMode="cover"
+                  />
                 </View>
               )}
               <View style={styles.locationPreviewDetails}>

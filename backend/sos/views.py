@@ -80,7 +80,7 @@ class CreateSOSView(APIView):
             "country": sos.country,
             "location": sos.location,
             "priority": sos.priority,
-        })
+        }, status=status.HTTP_201_CREATED)
     
     def get(self, request):
         sos_list = SOS.objects.filter(user=request.user).order_by("-created_at")

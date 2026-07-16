@@ -23,7 +23,7 @@ export default function Home() {
 
       if (token) {
         console.log("[index] Token found, navigating to dashboard");
-        router.replace("/(app)/dashboard");
+        router.replace("/dashboard");
       } else {
         console.log("[index] No token, showing login screen");
         setShowLogin(true);

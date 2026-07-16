@@ -1,5 +1,6 @@
 import { create } from "axios";
 import Constants from "expo-constants";
+import appConfig from "../../app.json";
 import * as SecureStore from "expo-secure-store";
 
 let cachedAccessToken = null;
@@ -13,7 +14,7 @@ function isWebEnvironment() {
 }
 
 function getDefaultApiBaseUrl() {
-  return "";
+  return appConfig?.expo?.extra?.apiBaseUrl?.trim() || "";
 }
 
 function getRuntimeApiBaseUrl() {
@@ -23,6 +24,9 @@ function getRuntimeApiBaseUrl() {
     "";
 
   if (runtimeBaseUrl.trim()) {
+    if (__DEV__) {
+      console.log("[api] using env API_BASE_URL", { runtimeBaseUrl });
+    }
     return runtimeBaseUrl.trim();
   }
 
@@ -30,16 +34,34 @@ function getRuntimeApiBaseUrl() {
     const configBaseUrl =
       Constants?.expoConfig?.extra?.apiBaseUrl ||
       Constants?.manifest2?.extra?.apiBaseUrl ||
+      Constants?.manifest?.extra?.apiBaseUrl ||
       "";
-
-    return configBaseUrl.trim() || getDefaultApiBaseUrl();
-  } catch {
+    const finalUrl =
+      getDefaultApiBaseUrl() ||
+      configBaseUrl.trim() ||
+      "";
+    if (__DEV__) {
+      console.log("[api] resolved apiBaseUrl from Expo constants", {
+        appJsonApiBaseUrl: getDefaultApiBaseUrl(),
+        configBaseUrl,
+        finalUrl,
+      });
+    }
+    return finalUrl;
+  } catch (error) {
+    if (__DEV__) {
+      console.log("[api] failed to resolve apiBaseUrl", { error: error?.message });
+    }
     return getDefaultApiBaseUrl();
   }
 }
 
 export function getApiBaseUrl() {
-  return getRuntimeApiBaseUrl();
+  const baseUrl = getRuntimeApiBaseUrl();
+  if (__DEV__) {
+    console.log("[api] getApiBaseUrl ->", { baseUrl });
+  }
+  return baseUrl;
 }
 
 export const API_BASE_URL = getApiBaseUrl();
@@ -48,6 +70,10 @@ export const api = create({
   baseURL: API_BASE_URL || undefined,
   timeout: 15000,
 });
+
+if (__DEV__) {
+  console.log("[api] axios baseURL configured", { API_BASE_URL });
+}
 
 api.interceptors.request.use(async (config) => {
   // Skip auth headers for login and register endpoints
@@ -81,6 +107,8 @@ export async function persistAuth(tokens, user) {
   const accessToken = tokens?.access || null;
   const refreshToken = tokens?.refresh || null;
 
+  console.log("[auth] persistAuth called", { accessToken: Boolean(accessToken), hasRefreshToken: Boolean(refreshToken), user: user?.username || user?.id });
+
   if (isWebEnvironment()) {
     globalThis.localStorage.setItem("access", accessToken || "");
     globalThis.localStorage.setItem("refresh", refreshToken || "");
@@ -101,6 +129,8 @@ export async function persistAuth(tokens, user) {
   cachedAccessToken = accessToken;
   tokenLoadPromise = Promise.resolve(accessToken);
 
+  console.log("[auth] token successfully stored", { hasToken: Boolean(accessToken), tokenLength: accessToken?.length || 0 });
+
   if (__DEV__) {
     console.log("[auth] persist token", {
       source: isWebEnvironment() ? "localStorage" : "secure-store",
@@ -112,10 +142,12 @@ export async function persistAuth(tokens, user) {
 
 export async function getStoredToken() {
   if (cachedAccessToken !== null) {
+    console.log("[auth] getStoredToken returning cached token", { hasToken: Boolean(cachedAccessToken), tokenLength: cachedAccessToken?.length || 0 });
     return cachedAccessToken;
   }
 
   if (tokenLoadPromise) {
+    console.log("[auth] getStoredToken returning pending token promise");
     return tokenLoadPromise;
   }
 
@@ -146,6 +178,12 @@ export async function getStoredToken() {
 
     cachedAccessToken = resolvedToken;
 
+    console.log("[auth] getStoredToken result", {
+      hasToken: Boolean(resolvedToken),
+      tokenLength: resolvedToken?.length || 0,
+      cacheMiss: resolvedToken !== cachedAccessToken,
+    });
+
     if (__DEV__) {
       console.log("[auth] getStoredToken", {
         hasToken: Boolean(resolvedToken),
@@ -159,14 +197,77 @@ export async function getStoredToken() {
   return tokenLoadPromise;
 }
 
+function safeAtob(input) {
+  try {
+    if (typeof atob === 'function') return atob(input);
+    if (typeof Buffer !== 'undefined') return Buffer.from(input, 'base64').toString('binary');
+  } catch (e) {
+    return null;
+  }
+  return null;
+}
+
+function parseJwt(token) {
+  try {
+    const parts = token.split('.');
+    if (parts.length < 2) return null;
+    const payload = parts[1];
+    const decoded = safeAtob(payload.replace(/-/g, '+').replace(/_/g, '/'));
+    if (!decoded) return null;
+    return JSON.parse(decodeURIComponent(escape(decoded)));
+  } catch (e) {
+    return null;
+  }
+}
+
+async function getStoredRefresh() {
+  if (isWebEnvironment()) {
+    return globalThis.localStorage.getItem('refresh');
+  }
+  try {
+    return await SecureStore.getItemAsync('refresh');
+  } catch (e) {
+    return null;
+  }
+}
+
+async function tryRefreshToken() {
+  const refresh = await getStoredRefresh();
+  if (!refresh) return false;
+
+  try {
+    const resp = await api.post('/token/refresh/', { refresh });
+    if (resp?.data?.access) {
+      await persistAuth(resp.data, JSON.parse(globalThis.localStorage.getItem('user') || '{}'));
+      return true;
+    }
+  } catch (error) {
+    if (__DEV__) {
+      console.log('[auth] refresh failed', error?.response?.status, error?.response?.data);
+    }
+  }
+
+  return false;
+}
+
 export async function getAuthHeaders(token = null) {
   const resolvedToken = token ?? (await getStoredToken());
   return resolvedToken ? { Authorization: `Bearer ${resolvedToken}` } : {};
 }
 
 export async function buildAuthRequestConfig(config = {}) {
+  // ensure token is valid; if expired try to refresh
   const token = await getStoredToken();
-  const authHeaders = await getAuthHeaders(token);
+  const payload = token ? parseJwt(token) : null;
+  const now = Math.floor(Date.now() / 1000);
+  if (payload?.exp && payload.exp <= now) {
+    if (__DEV__) console.log('[auth] access token expired, attempting refresh');
+    await tryRefreshToken();
+  }
+
+  const freshToken = await getStoredToken();
+  const authHeaders = await getAuthHeaders(freshToken);
+  console.log("[auth] Authorization header before request", { Authorization: authHeaders.Authorization || null });
   return {
     ...config,
     headers: {
