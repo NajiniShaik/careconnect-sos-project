@@ -1,6 +1,8 @@
-from unittest.mock import patch
+import time
+from unittest.mock import patch, Mock
 
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from rest_framework.test import APIClient
 from rest_framework import status
@@ -326,6 +328,142 @@ class SOSCategoryFlowTests(TestCase):
 
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
         self.assertFalse(SOSMessage.objects.filter(sos=sos).exists())
+
+    def test_resident_can_attach_audio_to_their_sos_message(self):
+        sos = SOS.objects.create(user=self.user, message="Need help", location="A", category="medical", status="OPEN")
+        audio_file = SimpleUploadedFile(
+            "voice-note.m4a",
+            b"fake-audio-data",
+            content_type="audio/m4a",
+        )
+
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(
+            f"/api/sos/{sos.id}/message/",
+            {"message": "", "audio": audio_file},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(SOSMessage.objects.filter(sos=sos).exists())
+        message = SOSMessage.objects.get(sos=sos)
+        self.assertTrue(message.audio_file)
+        self.assertIn("audio_url", response.data)
+
+    @patch("sos.views.transcription_module.transcribe_audio", return_value="Test transcript")
+    def test_whisper_transcribes_audio_for_authenticated_user(self, mock_transcribe):
+        audio_file = SimpleUploadedFile(
+            "voice-note.m4a",
+            b"fake-audio-data",
+            content_type="audio/m4a",
+        )
+
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(
+            "/api/sos/transcribe/",
+            {"audio": audio_file},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["success"], True)
+        self.assertEqual(response.data["transcript"], "Test transcript")
+        mock_transcribe.assert_called_once()
+
+    @patch("sos.views.transcription_module.transcribe_audio", side_effect=RuntimeError("transcription failed"))
+    def test_sos_transcription_endpoint_returns_failure_when_whisper_transcription_fails(self, mock_transcribe):
+        audio_file = SimpleUploadedFile(
+            "voice-note.m4a",
+            b"fake-audio-data",
+            content_type="audio/m4a",
+        )
+
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(
+            "/api/sos/transcribe/",
+            {"audio": audio_file},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        self.assertEqual(response.data["success"], False)
+        self.assertEqual(response.data["message"], "Unable to transcribe audio.")
+        mock_transcribe.assert_called_once()
+
+    def test_whisper_rejects_empty_audio_file(self):
+        audio_file = SimpleUploadedFile(
+            "voice-note.wav",
+            b"",
+            content_type="audio/wav",
+        )
+
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(
+            "/api/sos/transcribe/",
+            {"audio": audio_file},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["success"], False)
+        self.assertIn("The submitted file is empty.", str(response.data["errors"]))
+
+    @patch("sos.transcription.transcribe_audio", return_value="Help is needed immediately")
+    def test_transcription_is_stored_for_audio_messages(self, _mock_transcribe):
+        sos = SOS.objects.create(user=self.user, message="Need help", location="A", category="medical", status="OPEN")
+        audio_file = SimpleUploadedFile(
+            "voice-note.m4a",
+            b"fake-audio-data",
+            content_type="audio/m4a",
+        )
+
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(
+            f"/api/sos/{sos.id}/message/",
+            {"message": "", "audio": audio_file},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        message = SOSMessage.objects.get(sos=sos)
+
+        for _ in range(20):
+            message.refresh_from_db()
+            if message.transcription_status == "COMPLETED":
+                break
+            time.sleep(0.05)
+
+        self.assertEqual(message.transcription_status, "COMPLETED")
+        self.assertEqual(message.transcript, "Help is needed immediately")
+        self.assertIsNotNone(message.transcription_completed_at)
+
+    @patch("sos.transcription.transcribe_audio", side_effect=RuntimeError("transcription failed"))
+    def test_transcription_failure_keeps_audio_upload_successful(self, _mock_transcribe):
+        sos = SOS.objects.create(user=self.user, message="Need help", location="A", category="medical", status="OPEN")
+        audio_file = SimpleUploadedFile(
+            "voice-note.m4a",
+            b"fake-audio-data",
+            content_type="audio/m4a",
+        )
+
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(
+            f"/api/sos/{sos.id}/message/",
+            {"message": "", "audio": audio_file},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        message = SOSMessage.objects.get(sos=sos)
+
+        for _ in range(20):
+            message.refresh_from_db()
+            if message.transcription_status == "FAILED":
+                break
+            time.sleep(0.05)
+
+        self.assertEqual(message.transcription_status, "FAILED")
+        self.assertEqual(message.transcript, "")
 
     def test_security_and_admin_can_read_messages_for_any_sos_in_oldest_first_order(self):
         sos = SOS.objects.create(user=self.user, message="Need help", location="A", category="medical", status="OPEN")

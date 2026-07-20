@@ -66,3 +66,8 @@ export const deleteSosAlert = async (id) => {
   const cfg = await getConfig();
   return axios.delete(`${API}/alerts/${id}/`, cfg);
 };
+
+export const retrySosTranscription = async (id) => {
+  const cfg = await getConfig();
+  return axios.post(`${API}/${id}/transcribe/`, {}, cfg);
+};

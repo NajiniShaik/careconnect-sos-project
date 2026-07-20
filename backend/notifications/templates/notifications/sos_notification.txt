@@ -1,0 +1,11 @@
+SOS Alert
+
+Resident: {{ resident_name }}
+Society: {{ society_name }}
+Category: {{ category }}
+Severity: {{ severity }}
+Address: {{ address }}
+Time: {{ timestamp }}
+
+Message:
+{{ message }}

@@ -45,6 +45,9 @@ const iconMap = {
   "time-outline": "⏱️",
   "shield-checkmark-outline": "🛡️",
   "hand-left-outline": "🤝",
+  "location-outline": "📍",
+  "clipboard-outline": "📋",
+  "mic-outline": "🎤",
 };
 
 export function AppIcon({ name, size = 18, color = appColors.blue }) {

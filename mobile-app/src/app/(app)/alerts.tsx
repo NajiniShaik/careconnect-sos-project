@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import * as Location from "expo-location";
+import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
 import { AppButton, AppScreen, PageHeader, SectionCard, StatusBadge, appColors } from "../../components/common/designSystem";
 import { getStoredUser } from "../../services/authService";
-import { deleteSosAlert, fetchSosAlerts, fetchSosCategories, fetchSosMessages, normalizeSosHistory, resolveSosAlert, updateSosIncident } from "../../services/sosService";
+import { deleteSosAlert, fetchSosAlerts, fetchSosCategories, fetchSosMessages, mergeSosMessages, normalizeSosHistory, postSosMessage, resolveSosAlert, retrySosTranscription, updateSosIncident } from "../../services/sosService";
 
 function normalizeCategoryValue(value) {
   return String(value || "").trim().toLowerCase();
@@ -108,12 +109,20 @@ export default function AlertsRoute() {
   const [expandedAlertId, setExpandedAlertId] = useState(null);
   const [messagesByAlert, setMessagesByAlert] = useState({});
   const [incidentDrafts, setIncidentDrafts] = useState({});
+  const [messageDraftsByAlert, setMessageDraftsByAlert] = useState({});
   const [incidentCoordinatesByAlert, setIncidentCoordinatesByAlert] = useState({});
   const [messageLoadingByAlert, setMessageLoadingByAlert] = useState({});
+  const [messagePostingByAlert, setMessagePostingByAlert] = useState({});
   const [locationLoadingByAlert, setLocationLoadingByAlert] = useState({});
   const [incidentUpdatingByAlert, setIncidentUpdatingByAlert] = useState({});
   const [messageErrorsByAlert, setMessageErrorsByAlert] = useState({});
   const [incidentSuccessByAlert, setIncidentSuccessByAlert] = useState({});
+  const [messageSuccessByAlert, setMessageSuccessByAlert] = useState({});
+  const [playingVoiceNoteUrl, setPlayingVoiceNoteUrl] = useState(null);
+  const [transcriptionLoadingByAlert, setTranscriptionLoadingByAlert] = useState({});
+
+  const voiceNotePlayer = useAudioPlayer(playingVoiceNoteUrl, { downloadFirst: true });
+  const voiceNotePlayerStatus = useAudioPlayerStatus(voiceNotePlayer);
 
   const loadAlerts = useCallback(async (isRefresh = false) => {
     if (isRefresh) {
@@ -327,6 +336,45 @@ export default function AlertsRoute() {
     }
   }, [expandedAlertId, isAdmin, isResident, isSecurity, loadAlertMessages, messagesByAlert, user]);
 
+  const handlePostMessage = useCallback(async (alert) => {
+    if (!alert?.id || !isAlertOwnedByUser(alert, user)) {
+      return;
+    }
+
+    const alertId = String(alert.id);
+    const draftMessage = String(messageDraftsByAlert[alertId] ?? "").trim();
+
+    if (!draftMessage) {
+      setMessageErrorsByAlert((prev) => ({ ...prev, [alertId]: "Enter a message before posting it to the timeline." }));
+      return;
+    }
+
+    setMessagePostingByAlert((prev) => ({ ...prev, [alertId]: true }));
+    setMessageErrorsByAlert((prev) => ({ ...prev, [alertId]: "" }));
+    setMessageSuccessByAlert((prev) => ({ ...prev, [alertId]: "" }));
+
+    try {
+      const response = await postSosMessage(alert.id, draftMessage);
+      const postedMessage = response?.data || null;
+
+      if (postedMessage) {
+        setMessagesByAlert((prev) => ({
+          ...prev,
+          [alertId]: mergeSosMessages(prev[alertId] || [], postedMessage),
+        }));
+      }
+
+      setMessageDraftsByAlert((prev) => ({ ...prev, [alertId]: "" }));
+      await loadAlertMessages(alert.id);
+      setMessageSuccessByAlert((prev) => ({ ...prev, [alertId]: "Message added to the incident timeline." }));
+    } catch (error) {
+      console.log("[alerts] Failed to post incident message", error);
+      setMessageErrorsByAlert((prev) => ({ ...prev, [alertId]: "Unable to add the message right now." }));
+    } finally {
+      setMessagePostingByAlert((prev) => ({ ...prev, [alertId]: false }));
+    }
+  }, [loadAlertMessages, messageDraftsByAlert, user]);
+
   const handleRefreshLocation = useCallback(async (alert) => {
     if (!alert?.id || !isAlertOwnedByUser(alert, user)) {
       return;
@@ -358,6 +406,66 @@ export default function AlertsRoute() {
       setLocationLoadingByAlert((prev) => ({ ...prev, [alertId]: false }));
     }
   }, [user]);
+
+  const handleRetryTranscription = useCallback(async (alert) => {
+    if (!alert?.id) {
+      return;
+    }
+
+    const alertId = String(alert.id);
+    setTranscriptionLoadingByAlert((prev) => ({ ...prev, [alertId]: true }));
+
+    try {
+      const response = await retrySosTranscription(alert.id);
+      const latestMessage = response?.data || null;
+      if (latestMessage) {
+        setMessagesByAlert((prev) => ({ ...prev, [alertId]: mergeSosMessages(prev[alertId] || [], latestMessage) }));
+      }
+      await loadAlerts(true);
+    } catch (error) {
+      console.log("[alerts] Failed to retry transcription", error);
+      setMessageErrorsByAlert((prev) => ({ ...prev, [alertId]: "Transcript unavailable." }));
+    } finally {
+      setTranscriptionLoadingByAlert((prev) => ({ ...prev, [alertId]: false }));
+    }
+  }, [loadAlerts]);
+
+  useEffect(() => {
+    if (!playingVoiceNoteUrl) {
+      return undefined;
+    }
+
+    if (voiceNotePlayerStatus?.isLoaded) {
+      void voiceNotePlayer?.play?.();
+    }
+  }, [playingVoiceNoteUrl, voiceNotePlayerStatus, voiceNotePlayer]);
+
+  const handlePlayVoiceNote = useCallback(async (audioUrl) => {
+    if (!audioUrl) {
+      return;
+    }
+
+    try {
+      if (playingVoiceNoteUrl === audioUrl) {
+        if (voiceNotePlayerStatus?.playing && voiceNotePlayerStatus?.isLoaded) {
+          await voiceNotePlayer?.pause?.();
+          setPlayingVoiceNoteUrl(null);
+        } else if (voiceNotePlayerStatus?.isLoaded) {
+          await voiceNotePlayer?.play?.();
+        }
+        return;
+      }
+
+      if (voiceNotePlayerStatus?.playing && voiceNotePlayerStatus?.isLoaded) {
+        await voiceNotePlayer?.pause?.();
+      }
+
+      setPlayingVoiceNoteUrl(audioUrl);
+    } catch (error) {
+      console.log("[alerts] Failed to play voice note", error);
+      Alert.alert("Playback failed", "Unable to play the voice note right now.");
+    }
+  }, [playingVoiceNoteUrl, voiceNotePlayer, voiceNotePlayerStatus]);
 
   const handleUpdateIncident = useCallback(async (alert) => {
     if (!alert?.id || !isAlertOwnedByUser(alert, user)) {
@@ -424,7 +532,15 @@ export default function AlertsRoute() {
 
   return (
     <AppScreen scrollable={false}>
-      <View style={styles.screenContent}>
+      <ScrollView
+        style={styles.pageScroll}
+        contentContainerStyle={styles.pageContent}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={() => void loadAlerts(true)} tintColor={appColors.blue} />
+        }
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
         <PageHeader eyebrow="Emergency alerts" title="Alerts" subtitle="Browse resident alerts by category." />
 
         <SectionCard title="Categories" subtitle="Choose a category to focus the list." style={styles.cardSpacing}>
@@ -453,165 +569,201 @@ export default function AlertsRoute() {
         </SectionCard>
 
         <SectionCard title="Recent alerts" subtitle={categoryLabel} style={styles.cardSpacing}>
-          <ScrollView
-            style={styles.alertList}
-            contentContainerStyle={styles.alertListContent}
-            refreshControl={
-              <RefreshControl refreshing={refreshing} onRefresh={() => void loadAlerts(true)} tintColor={appColors.blue} />
-            }
-            showsVerticalScrollIndicator={false}
-          >
-            {loading && !refreshing ? (
-              <Text style={styles.emptyText}>Loading alerts...</Text>
-            ) : visibleAlerts.length === 0 ? (
-              <View style={styles.emptyState}>
-                <Text style={styles.emptyTitle}>No alerts available for this category.</Text>
-                <Text style={styles.emptyDescription}>Try a different category or pull to refresh.</Text>
-              </View>
-            ) : (
-              visibleAlerts.map((alert) => {
+          {loading && !refreshing ? (
+            <Text style={styles.emptyText}>Loading alerts...</Text>
+          ) : visibleAlerts.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyTitle}>No alerts available for this category.</Text>
+              <Text style={styles.emptyDescription}>Try a different category or pull to refresh.</Text>
+            </View>
+          ) : (
+            <View style={styles.alertListContent}>
+              {visibleAlerts.map((alert) => {
                 const canViewAlertUpdates = isAdmin || isSecurity || (isResident && isAlertOwnedByUser(alert, user));
 
                 return (
-                <View key={alert.id || `${alert.message}-${alert.created_at}`} style={styles.alertCard}>
-                  <View style={styles.alertHeaderRow}>
-                    <View style={styles.badgeRow}>
-                      <View style={styles.categoryBadge}>
-                        <Text style={styles.categoryBadgeText}>{getCategoryDisplayName(getAlertCategoryValue(alert), categories)}</Text>
+                  <View key={alert.id || `${alert.message}-${alert.created_at}`} style={styles.alertCard}>
+                    <View style={styles.alertHeaderRow}>
+                      <View style={styles.badgeRow}>
+                        <View style={styles.categoryBadge}>
+                          <Text style={styles.categoryBadgeText}>{getCategoryDisplayName(getAlertCategoryValue(alert), categories)}</Text>
+                        </View>
+                        <StatusBadge label={String(alert.status || "OPEN").toUpperCase()} tone={getStatusTone(alert.status)} compact />
                       </View>
-                      <StatusBadge label={String(alert.status || "OPEN").toUpperCase()} tone={getStatusTone(alert.status)} compact />
                     </View>
-                  </View>
 
-                  <Text style={styles.alertMessage}>{alert.message || "Emergency alert"}</Text>
-                  {isSecurity || isAdmin ? (
-                    <View style={styles.userMetaWrap}>
-                      <Text style={styles.metaText}>Resident: {alert.user || "Unknown"}</Text>
-                      {alert.location ? <Text style={styles.metaText}>Location: {alert.location}</Text> : null}
-                    </View>
-                  ) : null}
-                  <Text style={styles.metaText}>{formatAlertTime(alert.created_at)}</Text>
-                  {alert.location && !(isSecurity || isAdmin) ? <Text style={styles.metaText}>{alert.location}</Text> : null}
-                  {isAdmin ? (
-                    <View style={styles.actionRow}>
-                      <AppButton
-                        title={actionLoadingId === getAlertIdentifier(alert) ? "Working..." : "Resolve"}
-                        onPress={() => {
-                          const alertId = getAlertIdentifier(alert);
-                          console.log("[alerts] Resolve button tapped", { alertId });
-                          void handleResolveAlert(alert);
-                        }}
-                        variant="secondary"
-                        style={styles.actionButton}
-                        loading={actionLoadingId === getAlertIdentifier(alert)}
-                      />
-                      <AppButton
-                        title={actionLoadingId === getAlertIdentifier(alert) ? "Working..." : "Delete"}
-                        onPress={() => {
-                          const alertId = getAlertIdentifier(alert);
-                          console.log("[alerts] Delete button tapped", { alertId });
-                          void handleDeleteAlert(alert);
-                        }}
-                        variant="danger"
-                        style={styles.actionButton}
-                        loading={actionLoadingId === getAlertIdentifier(alert)}
-                      />
-                    </View>
-                  ) : null}
-                  {canViewAlertUpdates ? (
-                    <>
-                      <View style={styles.updateSection}>
-                        <Pressable style={styles.updateToggle} onPress={() => void handleToggleAlertMessages(alert)}>
-                          <Text style={styles.updateTitle}>Incident Updates</Text>
-                          <Text style={styles.updateHint}>{expandedAlertId === String(alert.id) ? "Hide" : "Show"}</Text>
-                        </Pressable>
+                    <Text style={styles.alertMessage}>{alert.message || "Emergency alert"}</Text>
+                    {isSecurity || isAdmin ? (
+                      <View style={styles.userMetaWrap}>
+                        <Text style={styles.metaText}>Resident: {alert.user || "Unknown"}</Text>
+                        {alert.location ? <Text style={styles.metaText}>Location: {alert.location}</Text> : null}
+                      </View>
+                    ) : null}
+                    <Text style={styles.metaText}>{formatAlertTime(alert.created_at)}</Text>
+                    {alert.location && !(isSecurity || isAdmin) ? <Text style={styles.metaText}>{alert.location}</Text> : null}
+                    {isAdmin ? (
+                      <View style={styles.actionRow}>
+                        <AppButton
+                          title={actionLoadingId === getAlertIdentifier(alert) ? "Working..." : "Resolve"}
+                          onPress={() => {
+                            const alertId = getAlertIdentifier(alert);
+                            console.log("[alerts] Resolve button tapped", { alertId });
+                            void handleResolveAlert(alert);
+                          }}
+                          variant="secondary"
+                          style={styles.actionButton}
+                          loading={actionLoadingId === getAlertIdentifier(alert)}
+                        />
+                        <AppButton
+                          title={actionLoadingId === getAlertIdentifier(alert) ? "Working..." : "Delete"}
+                          onPress={() => {
+                            const alertId = getAlertIdentifier(alert);
+                            console.log("[alerts] Delete button tapped", { alertId });
+                            void handleDeleteAlert(alert);
+                          }}
+                          variant="danger"
+                          style={styles.actionButton}
+                          loading={actionLoadingId === getAlertIdentifier(alert)}
+                        />
+                      </View>
+                    ) : null}
+                    {canViewAlertUpdates ? (
+                      <>
+                        <View style={styles.updateSection}>
+                          <Pressable style={styles.updateToggle} onPress={() => void handleToggleAlertMessages(alert)}>
+                            <Text style={styles.updateTitle}>Incident Updates</Text>
+                            <Text style={styles.updateHint}>{expandedAlertId === String(alert.id) ? "Hide" : "Show"}</Text>
+                          </Pressable>
 
-                        {expandedAlertId === String(alert.id) ? (
-                          <View style={styles.updateContent}>
-                            {messageLoadingByAlert[String(alert.id)] ? (
-                              <Text style={styles.emptyText}>Loading updates...</Text>
-                            ) : (messagesByAlert[String(alert.id)] || []).length === 0 ? (
-                              <Text style={styles.emptyText}>No incident updates yet.</Text>
-                            ) : (
-                              <View style={styles.messageList}>
-                                {sortMessagesForDisplay(messagesByAlert[String(alert.id)] || []).map((message) => (
-                                  <View key={message.id || `${message.created_at}-${message.message}`} style={styles.messageBubble}>
-                                    <Text style={styles.messageText}>{message.message}</Text>
-                                    <Text style={styles.messageMeta}>{message.sender?.username || "Resident"} • {formatAlertTime(message.created_at)}</Text>
-                                  </View>
-                                ))}
-                              </View>
-                            )}
-
-                            {isResident && isAlertOwnedByUser(alert, user) ? (
-                              <View style={styles.updateForm}>
-                                <View style={styles.locationBlock}>
-                                  <Text style={styles.fieldLabel}>Current address</Text>
-                                  <Text style={styles.locationValue}>{alert.address || alert.location || "Address unavailable"}</Text>
-                                  <Text style={styles.locationValue}>
-                                    Lat: {Number.isFinite(incidentCoordinatesByAlert[String(alert.id)]?.latitude ?? alert.latitude) ? String(incidentCoordinatesByAlert[String(alert.id)]?.latitude ?? alert.latitude) : "—"} • Lon: {Number.isFinite(incidentCoordinatesByAlert[String(alert.id)]?.longitude ?? alert.longitude) ? String(incidentCoordinatesByAlert[String(alert.id)]?.longitude ?? alert.longitude) : "—"}
-                                  </Text>
+                          {expandedAlertId === String(alert.id) ? (
+                            <View style={styles.updateContent}>
+                              {messageLoadingByAlert[String(alert.id)] ? (
+                                <Text style={styles.emptyText}>Loading updates...</Text>
+                              ) : (messagesByAlert[String(alert.id)] || []).length === 0 ? (
+                                <Text style={styles.emptyText}>No incident updates yet.</Text>
+                              ) : (
+                                <View style={styles.messageList}>
+                                  {sortMessagesForDisplay(messagesByAlert[String(alert.id)] || []).map((message) => (
+                                    <View key={message.id || `${message.created_at}-${message.message}`} style={styles.messageBubble}>
+                                      <Text style={styles.messageText}>{message.message}</Text>
+                                      {message.audio_url ? (
+                                        <View style={styles.voiceNoteRow}>
+                                          <AppButton
+                                            title={playingVoiceNoteUrl === message.audio_url && voiceNotePlayer?.playing ? "Pause voice note" : "Play voice note"}
+                                            onPress={() => void handlePlayVoiceNote(message.audio_url)}
+                                            variant="secondary"
+                                            style={styles.actionButton}
+                                          />
+                                        </View>
+                                      ) : null}
+                                      {message.audio_url ? (
+                                        <View style={styles.voiceNoteRow}>
+                                          {message.transcription_status === "PENDING" ? (
+                                            <Text style={styles.transcriptText}>Transcribing...</Text>
+                                          ) : message.transcript ? (
+                                            <Text style={styles.transcriptText}>Transcript: {message.transcript}</Text>
+                                          ) : (
+                                            <View style={styles.voiceNoteRow}>
+                                              <Text style={styles.transcriptText}>Transcript unavailable.</Text>
+                                              <AppButton title="Retry transcription" onPress={() => void handleRetryTranscription(alert)} variant="secondary" style={styles.actionButton} loading={transcriptionLoadingByAlert[String(alert.id)]} />
+                                            </View>
+                                          )}
+                                        </View>
+                                      ) : null}
+                                      <Text style={styles.messageMeta}>{message.sender?.username || "Resident"} • {formatAlertTime(message.created_at)}</Text>
+                                    </View>
+                                  ))}
                                 </View>
+                              )}
 
-                                <View style={styles.actionRow}>
+                              {isResident && isAlertOwnedByUser(alert, user) ? (
+                                <View style={styles.updateForm}>
+                                  <View style={styles.locationBlock}>
+                                    <Text style={styles.fieldLabel}>Current address</Text>
+                                    <Text style={styles.locationValue}>{alert.address || alert.location || "Address unavailable"}</Text>
+                                    <Text style={styles.locationValue}>
+                                      Lat: {Number.isFinite(incidentCoordinatesByAlert[String(alert.id)]?.latitude ?? alert.latitude) ? String(incidentCoordinatesByAlert[String(alert.id)]?.latitude ?? alert.latitude) : "—"} • Lon: {Number.isFinite(incidentCoordinatesByAlert[String(alert.id)]?.longitude ?? alert.longitude) ? String(incidentCoordinatesByAlert[String(alert.id)]?.longitude ?? alert.longitude) : "—"}
+                                    </Text>
+                                  </View>
+
+                                  <View style={styles.actionRow}>
+                                    <AppButton
+                                      title={locationLoadingByAlert[String(alert.id)] ? "Refreshing..." : "Refresh Location"}
+                                      onPress={() => void handleRefreshLocation(alert)}
+                                      variant="secondary"
+                                      style={styles.actionButton}
+                                      loading={locationLoadingByAlert[String(alert.id)]}
+                                    />
+                                  </View>
+
+                                  <Text style={styles.fieldLabel}>Add message</Text>
+                                  <TextInput
+                                    style={styles.messageInput}
+                                    placeholder="Add an update for the incident timeline"
+                                    placeholderTextColor={appColors.muted}
+                                    value={messageDraftsByAlert[String(alert.id)] ?? ""}
+                                    onChangeText={(value) => setMessageDraftsByAlert((prev) => ({ ...prev, [String(alert.id)]: value.slice(0, 500) }))}
+                                    multiline
+                                    maxLength={500}
+                                  />
                                   <AppButton
-                                    title={locationLoadingByAlert[String(alert.id)] ? "Refreshing..." : "Refresh Location"}
-                                    onPress={() => void handleRefreshLocation(alert)}
+                                    title={messagePostingByAlert[String(alert.id)] ? "Posting..." : "Add Message"}
+                                    onPress={() => void handlePostMessage(alert)}
                                     variant="secondary"
-                                    style={styles.actionButton}
-                                    loading={locationLoadingByAlert[String(alert.id)]}
+                                    style={styles.sendButton}
+                                    loading={messagePostingByAlert[String(alert.id)]}
+                                  />
+
+                                  <Text style={styles.fieldLabel}>Emergency Description</Text>
+                                  <TextInput
+                                    style={styles.messageInput}
+                                    placeholder="Describe the incident"
+                                    placeholderTextColor={appColors.muted}
+                                    value={incidentDrafts[String(alert.id)] ?? alert.message ?? ""}
+                                    onChangeText={(value) => setIncidentDrafts((prev) => ({ ...prev, [String(alert.id)]: value.slice(0, 500) }))}
+                                    multiline
+                                    maxLength={500}
+                                  />
+
+                                  <AppButton
+                                    title={incidentUpdatingByAlert[String(alert.id)] ? "Updating..." : "Update Incident"}
+                                    onPress={() => void handleUpdateIncident(alert)}
+                                    variant="primary"
+                                    style={styles.sendButton}
+                                    loading={incidentUpdatingByAlert[String(alert.id)]}
                                   />
                                 </View>
+                              ) : null}
 
-                                <Text style={styles.fieldLabel}>Emergency Description</Text>
-                                <TextInput
-                                  style={styles.messageInput}
-                                  placeholder="Describe the incident"
-                                  placeholderTextColor={appColors.muted}
-                                  value={incidentDrafts[String(alert.id)] ?? alert.message ?? ""}
-                                  onChangeText={(value) => setIncidentDrafts((prev) => ({ ...prev, [String(alert.id)]: value.slice(0, 500) }))}
-                                  multiline
-                                  maxLength={500}
-                                />
+                              {messageSuccessByAlert[String(alert.id)] ? <Text style={styles.successText}>{messageSuccessByAlert[String(alert.id)]}</Text> : null}
+                              {incidentSuccessByAlert[String(alert.id)] ? <Text style={styles.successText}>{incidentSuccessByAlert[String(alert.id)]}</Text> : null}
+                              {messageErrorsByAlert[String(alert.id)] ? <Text style={styles.messageError}>{messageErrorsByAlert[String(alert.id)]}</Text> : null}
+                            </View>
+                          ) : null}
+                        </View>
+                      </>
+                    ) : null}
 
-                                <AppButton
-                                  title={incidentUpdatingByAlert[String(alert.id)] ? "Updating..." : "Update Incident"}
-                                  onPress={() => void handleUpdateIncident(alert)}
-                                  variant="primary"
-                                  style={styles.sendButton}
-                                  loading={incidentUpdatingByAlert[String(alert.id)]}
-                                />
-                              </View>
-                            ) : null}
-
-                            {incidentSuccessByAlert[String(alert.id)] ? <Text style={styles.successText}>{incidentSuccessByAlert[String(alert.id)]}</Text> : null}
-                            {messageErrorsByAlert[String(alert.id)] ? <Text style={styles.messageError}>{messageErrorsByAlert[String(alert.id)]}</Text> : null}
-                          </View>
-                        ) : null}
+                    {isResident && isAlertOwnedByUser(alert, user) ? (
+                      <View style={styles.actionRow}>
+                        <AppButton
+                          title={actionLoadingId === getAlertIdentifier(alert) ? "Working..." : "Delete"}
+                          onPress={() => {
+                            const alertId = getAlertIdentifier(alert);
+                            console.log("[alerts] Delete button tapped", { alertId });
+                            void handleResidentDeleteAlert(alert);
+                          }}
+                          variant="danger"
+                          style={styles.actionButton}
+                          loading={actionLoadingId === getAlertIdentifier(alert)}
+                        />
                       </View>
-                    </>
-                  ) : null}
-
-                  {isResident && isAlertOwnedByUser(alert, user) ? (
-                    <View style={styles.actionRow}>
-                      <AppButton
-                        title={actionLoadingId === getAlertIdentifier(alert) ? "Working..." : "Delete"}
-                        onPress={() => {
-                          const alertId = getAlertIdentifier(alert);
-                          console.log("[alerts] Delete button tapped", { alertId });
-                          void handleResidentDeleteAlert(alert);
-                        }}
-                        variant="danger"
-                        style={styles.actionButton}
-                        loading={actionLoadingId === getAlertIdentifier(alert)}
-                      />
-                    </View>
-                  ) : null}
-                </View>
+                    ) : null}
+                  </View>
                 );
-              })
-            )}
-          </ScrollView>
+              })}
+            </View>
+          )}
         </SectionCard>
 
         <SectionCard title="Support contacts" subtitle="Reach out for help if needed." style={styles.cardSpacing}>
@@ -624,20 +776,20 @@ export default function AlertsRoute() {
             <Text style={styles.detailValue}>112</Text>
           </View>
         </SectionCard>
-      </View>
+      </ScrollView>
     </AppScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  screenContent: { flex: 1 },
+  pageScroll: { flex: 1, backgroundColor: appColors.mist },
+  pageContent: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 96 },
   cardSpacing: { marginBottom: 14 },
   categoryRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingRight: 4 },
   categoryChip: { borderWidth: 1, borderColor: appColors.border, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8, marginRight: 8, backgroundColor: appColors.white },
   categoryChipActive: { borderColor: appColors.blue, backgroundColor: appColors.blueSoft },
   categoryChipText: { color: appColors.slate, fontSize: 13, fontWeight: "700" },
   categoryChipTextActive: { color: appColors.blue },
-  alertList: { maxHeight: 320 },
   alertListContent: { paddingBottom: 8 },
   alertCard: { borderWidth: 1, borderColor: appColors.border, borderRadius: 14, padding: 12, marginTop: 10, backgroundColor: "#fafcff" },
   alertHeaderRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 },
@@ -659,6 +811,8 @@ const styles = StyleSheet.create({
   messageText: { color: appColors.navy, fontSize: 13, lineHeight: 18 },
   messageMeta: { color: appColors.muted, fontSize: 11, marginTop: 4 },
   updateForm: { gap: 8 },
+  voiceNoteRow: { marginTop: 8 },
+  transcriptText: { color: appColors.slate, fontSize: 12, lineHeight: 18 },
   locationBlock: { borderRadius: 10, padding: 10, backgroundColor: appColors.white, borderWidth: 1, borderColor: appColors.border },
   fieldLabel: { color: appColors.navy, fontSize: 12, fontWeight: "700" },
   locationValue: { color: appColors.slate, fontSize: 12, marginTop: 4 },

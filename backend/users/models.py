@@ -10,7 +10,7 @@ class User(AbstractUser):
         SECURITY = "SECURITY", "Security"
         ADMIN = "ADMIN", "Admin"
 
-    role = models.CharField(max_length=20, choices=Role.choices)
+    role = models.CharField(max_length=20, choices=Role.choices, default=Role.RESIDENT)
     phone = models.CharField(max_length=15, blank=True, null=True)
     is_verified = models.BooleanField(default=False)
 

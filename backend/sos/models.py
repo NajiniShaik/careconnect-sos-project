@@ -34,6 +34,9 @@ class SOS(models.Model):
     city = models.CharField(max_length=100, blank=True, null=True)
     state = models.CharField(max_length=100, blank=True, null=True)
     country = models.CharField(max_length=100, blank=True, null=True)
+    transcript = models.TextField(blank=True, default="")
+    transcription_status = models.CharField(max_length=20, default="PENDING")
+    transcription_completed_at = models.DateTimeField(blank=True, null=True)
 
     status = models.CharField(
         max_length=20,
@@ -57,6 +60,10 @@ class SOSMessage(models.Model):
     sos = models.ForeignKey(SOS, on_delete=models.CASCADE, related_name="messages")
     sender = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="sos_messages")
     message = models.TextField(blank=True)
+    audio_file = models.FileField(upload_to="sos_audio/%Y/%m/%d/", blank=True, null=True)
+    transcript = models.TextField(blank=True, default="")
+    transcription_status = models.CharField(max_length=20, default="PENDING")
+    transcription_completed_at = models.DateTimeField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

@@ -10,6 +10,7 @@ import FlatManagement from "./pages/FlatManagement";
 import ResidentManagement from "./pages/ResidentManagement";
 import EmergencyContactManagement from "./pages/EmergencyContactManagement";
 import AlertsManagement from "./pages/AlertsManagement";
+import NotificationTemplates from "./pages/NotificationTemplates";
 
 function App() {
   const token = localStorage.getItem("access");
@@ -80,6 +81,15 @@ function App() {
         element={
           <ProtectedRoute>
             <AlertsManagement />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/notification-templates"
+        element={
+          <ProtectedRoute>
+            <NotificationTemplates />
           </ProtectedRoute>
         }
       />

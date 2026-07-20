@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import AdminLayout from "../components/common/AdminLayout";
-import { deleteSosAlert, getSosAlerts, resolveSosAlert } from "../api/sosApi";
+import { deleteSosAlert, getSosAlerts, resolveSosAlert, retrySosTranscription } from "../api/sosApi";
 
 const categoryOptions = ["All", "Medical", "Fire", "Security", "Power", "Other"];
 const statusOptions = ["All", "Open", "In Progress", "Resolved"];
@@ -54,6 +54,8 @@ export default function AlertsManagement() {
   const [actionLoadingId, setActionLoadingId] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [page, setPage] = useState(1);
+  const [audioPlayers, setAudioPlayers] = useState({});
+  const [transcribingIds, setTranscribingIds] = useState({});
   const role = (localStorage.getItem("role") || "").toUpperCase();
   const storedUser = JSON.parse(localStorage.getItem("user") || "{}") || {};
   const residentUserId = String(storedUser?.id || "").trim();
@@ -192,6 +194,45 @@ export default function AlertsManagement() {
     } finally {
       setActionLoadingId(null);
     }
+  };
+
+  const handleRetryTranscription = async (alert) => {
+    if (!alert?.id) {
+      return;
+    }
+
+    const alertId = String(alert.id);
+    setTranscribingIds((prev) => ({ ...prev, [alertId]: true }));
+    setNotification(null);
+
+    try {
+      await retrySosTranscription(alert.id);
+      await loadAlerts(true);
+      setNotification({ type: "success", message: "Transcription retry started." });
+    } catch (err) {
+      console.error("Failed to retry transcription", err);
+      setNotification({ type: "error", message: "Unable to retry transcription." });
+    } finally {
+      setTranscribingIds((prev) => ({ ...prev, [alertId]: false }));
+    }
+  };
+
+  const handleAudioPlayback = (audioUrl, alertId) => {
+    if (!audioUrl) {
+      return;
+    }
+
+    const currentPlayer = audioPlayers[alertId];
+    if (currentPlayer) {
+      currentPlayer.pause();
+      currentPlayer.currentTime = 0;
+      setAudioPlayers((prev) => ({ ...prev, [alertId]: null }));
+      return;
+    }
+
+    const player = new Audio(audioUrl);
+    player.play().catch(() => undefined);
+    setAudioPlayers((prev) => ({ ...prev, [alertId]: player }));
   };
 
   const handlePageChange = (nextPage) => {
@@ -339,7 +380,39 @@ export default function AlertsManagement() {
                       <tr key={alert.id} style={{ borderTop: "1px solid #e2e8f0" }}>
                         <td style={{ padding: "12px 14px", fontWeight: 700, color: "#0f172a" }}>{alert?.user?.username || alert?.user?.name || "Unknown"}</td>
                         <td style={{ padding: "12px 14px", color: "#334155" }}>{String(alert?.category || "Other").replace(/^./, (char) => char.toUpperCase())}</td>
-                        <td style={{ padding: "12px 14px", color: "#334155", maxWidth: "280px" }}>{alert?.message || "—"}</td>
+                        <td style={{ padding: "12px 14px", color: "#334155", maxWidth: "280px" }}>
+                          <div>{alert?.message || "—"}</div>
+                          {Array.isArray(alert?.messages) && alert.messages.length > 0 ? (
+                            <div style={{ marginTop: "10px", display: "grid", gap: "8px" }}>
+                              {alert.messages.map((message) => (
+                                <div key={message.id || `${message.created_at}-${message.message}`} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "10px" }}>
+                                  <div style={{ fontSize: "13px", color: "#334155", marginBottom: "6px" }}>{message.message || "Voice note"}</div>
+                                  {message.audio_url ? (
+                                    <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", marginBottom: "6px" }}>
+                                      <button onClick={() => handleAudioPlayback(message.audio_url, alert.id)} style={{ border: "none", background: "#2563eb", color: "white", borderRadius: "999px", padding: "6px 10px", cursor: "pointer", fontWeight: 700 }}>
+                                        {audioPlayers[alert.id] ? "Stop playback" : "Play voice note"}
+                                      </button>
+                                    </div>
+                                  ) : null}
+                                  {message.audio_url ? (
+                                    message.transcription_status === "PENDING" ? (
+                                      <div style={{ color: "#64748b", fontSize: "12px" }}>Transcribing...</div>
+                                    ) : message.transcript ? (
+                                      <div style={{ color: "#334155", fontSize: "12px", lineHeight: 1.5 }}>Transcript: {message.transcript}</div>
+                                    ) : (
+                                      <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                        <div style={{ color: "#64748b", fontSize: "12px" }}>Transcript unavailable.</div>
+                                        <button onClick={() => void handleRetryTranscription(alert)} disabled={transcribingIds[String(alert.id)]} style={{ border: "1px solid #dbeafe", background: "white", color: "#2563eb", borderRadius: "999px", padding: "5px 10px", cursor: "pointer", fontWeight: 700 }}>
+                                          {transcribingIds[String(alert.id)] ? "Retrying..." : "Retry transcription"}
+                                        </button>
+                                      </div>
+                                    )
+                                  ) : null}
+                                </div>
+                              ))}
+                            </div>
+                          ) : null}
+                        </td>
                         <td style={{ padding: "12px 14px", color: "#334155" }}>{alert?.location || "—"}</td>
                         <td style={{ padding: "12px 14px" }}>
                           <span style={{ display: "inline-block", padding: "6px 10px", borderRadius: "999px", fontSize: "12px", fontWeight: 700, background: statusTone.background, color: statusTone.color }}>

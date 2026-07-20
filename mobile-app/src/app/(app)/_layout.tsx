@@ -1,7 +1,10 @@
 import { Tabs, useFocusEffect, useRouter } from "expo-router";
-import { useCallback, useEffect } from "react";
+import React, { useCallback, useEffect } from "react";
 import { AppIcon, appColors } from "../../components/common/designSystem";
 import { getStoredToken } from "../../services/authService";
+import notificationService from "../../services/notificationService";
+import * as Device from "expo-device";
+import { Platform } from "react-native";
 
 export default function AppLayout() {
   const router = useRouter();
@@ -17,6 +20,66 @@ export default function AppLayout() {
   useEffect(() => {
     void verifyAuth();
   }, [verifyAuth]);
+
+  // initialize notifications when app layout mounts and user is authenticated
+  useEffect(() => {
+    let unsub = null;
+    const init = async () => {
+      const token = await getStoredToken();
+      if (!token) return;
+
+      const perm = await notificationService.requestNotificationPermission();
+      if ((perm && perm.status === "granted") || perm.status === "granted") {
+        try {
+          const expoToken = await notificationService.getExpoPushTokenAsync();
+          const platform = (Device.osName || Platform.OS || "unknown").toLowerCase();
+          const deviceId = `${Device.modelName || "device"}-${Date.now()}`;
+          if (expoToken) {
+            try {
+              await notificationService.registerDeviceWithBackend({ token: expoToken, platform: platform, device_id: deviceId });
+            } catch (err) {
+              // register failed - will retry later
+            }
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
+
+      unsub = notificationService.addNotificationListener({
+        onReceived: (n) => {
+          // save locally
+          const payload = n.request.content;
+          void notificationService.saveLocalNotification({
+            id: payload.data?.id || `${Date.now()}`,
+            title: payload.title,
+            body: payload.body,
+            data: payload.data || {},
+            read: false,
+            received_at: new Date().toISOString(),
+          });
+        },
+        onResponse: (r) => {
+          // navigate on tap
+          const data = r.notification.request.content.data || {};
+          const target = data?.target || null;
+          if (target) {
+            // use router to navigate
+            try {
+              router.push(target);
+            } catch (e) {
+              // ignore navigation errors
+            }
+          }
+        },
+      });
+    };
+
+    void init();
+    return () => {
+      if (unsub) unsub();
+    };
+  }, [router]);
 
   useFocusEffect(
     useCallback(() => {

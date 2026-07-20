@@ -1,14 +1,23 @@
+from django.db import transaction
 from django.shortcuts import render 
-from .serializers import SOSSerializer, SOSStatusUpdateSerializer, SOSResidentUpdateSerializer, SOSMessageCreateSerializer, SOSMessageSerializer
+from .serializers import SOSSerializer, SOSStatusUpdateSerializer, SOSResidentUpdateSerializer, SOSMessageCreateSerializer, SOSMessageSerializer, SpeechToTextSerializer
 
 # Create your views here.
 from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.parsers import MultiPartParser, FormParser
 from .models import SOS, SOSMessage
+from . import transcription as transcription_module
+from .transcription import enqueue_transcription
 from .utils import reverse_geocode_coordinates
 from users.permissions import IsAdmin, IsResident, IsSecurity
+from django.contrib.auth import get_user_model
+from notifications.services import NotificationService
+import logging
+from typing import List
+
 
 
 class SOSCategoriesView(APIView):
@@ -67,6 +76,86 @@ class CreateSOSView(APIView):
             priority=normalized_priority,
         )
 
+        # Trigger notifications (best-effort). Do not let notification
+        # failures affect the core SOS creation flow.
+        try:
+            User = get_user_model()
+            notif = NotificationService()
+
+            resident_name = getattr(request.user, "get_full_name", None)
+            try:
+                resident_name = request.user.get_full_name() or request.user.username
+            except Exception:
+                resident_name = getattr(request.user, "username", "Resident")
+
+            society_name = ""
+            try:
+                profile = getattr(request.user, "resident_profile", None)
+                if profile and getattr(profile, "society", None):
+                    society_name = profile.society.name
+            except Exception:
+                society_name = ""
+
+            context = {
+                "resident_name": resident_name,
+                "society_name": society_name,
+                "category": sos.category,
+                "severity": sos.priority,
+                "address": sos.address or sos.location or "",
+                "timestamp": sos.created_at.isoformat() if getattr(sos, "created_at", None) else "",
+                "message": sos.message or "",
+            }
+
+            # Email recipients: admins and security users for the society (best-effort)
+            try:
+                admin_qs = User.objects.filter(role__in=["ADMIN", "SECURITY"])
+                if society_name:
+                    admin_qs = admin_qs.filter(resident_profile__society__name=society_name)
+                admin_emails = [u.email for u in admin_qs if u.email]
+            except Exception:
+                admin_emails = []
+
+            # SMS recipients: emergency contacts (resident profile)
+            sms_numbers = []
+            try:
+                profile = getattr(request.user, "resident_profile", None)
+                if profile:
+                    for ec in getattr(profile, "emergency_contacts", []).all():
+                        if getattr(ec, "phone", None):
+                            sms_numbers.append(ec.phone)
+            except Exception:
+                sms_numbers = []
+
+            # FCM device tokens: this project currently does not store device
+            # tokens centrally; if you have tokens, pass them here.
+            device_tokens: List[str] = []
+
+            # Fire off notifications (best-effort)
+            try:
+                if admin_emails:
+                    notif.send_email_notification(admin_emails, "SOS Alert: %s" % (sos.category or "SOS"), "notifications/sos_notification", context)
+            except Exception:
+                logger = logging.getLogger(__name__)
+                logger.exception("Failed to send SOS email notifications")
+
+            try:
+                if sms_numbers:
+                    notif.send_sms_notification(sms_numbers, f"SOS: {sos.category or 'SOS'} at {context['address']}")
+            except Exception:
+                logger = logging.getLogger(__name__)
+                logger.exception("Failed to send SOS SMS notifications")
+
+            try:
+                if device_tokens:
+                    notif.send_push_notification(device_tokens, f"SOS: {sos.category or 'SOS'}", context["message"] or "New SOS alert", data={"sos_id": str(sos.id)})
+            except Exception:
+                logger = logging.getLogger(__name__)
+                logger.exception("Failed to send SOS push notifications")
+        except Exception:
+            # Ensure notifications cannot break the primary flow
+            import logging as _logging
+            _logging.getLogger(__name__).exception("Unexpected error while triggering notifications")
+
         return Response({
             "id": sos.id,
             "status": sos.status,
@@ -80,12 +169,12 @@ class CreateSOSView(APIView):
             "country": sos.country,
             "location": sos.location,
             "priority": sos.priority,
-        }, status=status.HTTP_201_CREATED)
+        }, status=status.HTTP_200_OK)
     
     def get(self, request):
         sos_list = SOS.objects.filter(user=request.user).order_by("-created_at")
 
-        serializer = SOSSerializer(sos_list, many=True)
+        serializer = SOSSerializer(sos_list, many=True, context={"request": request})
 
         return Response(serializer.data)
 
@@ -106,7 +195,7 @@ class SOSMessageView(APIView):
             return Response(status=status.HTTP_403_FORBIDDEN)
 
         messages = SOSMessage.objects.filter(sos=sos).order_by("created_at", "id")
-        serializer = SOSMessageSerializer(messages, many=True)
+        serializer = SOSMessageSerializer(messages, many=True, context={"request": request})
         return Response(serializer.data)
 
     def post(self, request, pk):
@@ -125,14 +214,93 @@ class SOSMessageView(APIView):
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+        audio_file = serializer.validated_data.get("audio")
+        transcription_status = "PENDING" if audio_file else "NOT_REQUIRED"
+
         message = SOSMessage.objects.create(
             sos=sos,
             sender=request.user,
-            message=serializer.validated_data["message"],
+            message=serializer.validated_data.get("message", "") or "",
+            audio_file=audio_file,
+            transcription_status=transcription_status,
         )
 
-        output_serializer = SOSMessageSerializer(message)
+        if audio_file:
+            sos.transcript = ""
+            sos.transcription_status = "PENDING"
+            sos.transcription_completed_at = None
+            sos.save(update_fields=["transcript", "transcription_status", "transcription_completed_at"])
+            enqueue_transcription(message, message.audio_file.path, transcribe_func=transcription_module.transcribe_audio)
+
+        output_serializer = SOSMessageSerializer(message, context={"request": request})
         return Response(output_serializer.data, status=status.HTTP_201_CREATED)
+
+
+class SOSRetryTranscriptionView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            sos = SOS.objects.get(pk=pk)
+        except SOS.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        if request.user.role == "RESIDENT" and sos.user_id != request.user.id:
+            return Response(status=status.HTTP_403_FORBIDDEN)
+
+        if request.user.role not in ["RESIDENT", "SECURITY", "ADMIN"]:
+            return Response(status=status.HTTP_403_FORBIDDEN)
+
+        latest_audio_message = sos.messages.filter(audio_file__isnull=False).order_by("-created_at", "-id").first()
+        if not latest_audio_message:
+            return Response({"detail": "No audio attachment found"}, status=status.HTTP_404_NOT_FOUND)
+
+        latest_audio_message.transcript = ""
+        latest_audio_message.transcription_status = "PENDING"
+        latest_audio_message.transcription_completed_at = None
+        latest_audio_message.save(update_fields=["transcript", "transcription_status", "transcription_completed_at"])
+
+        sos.transcript = ""
+        sos.transcription_status = "PENDING"
+        sos.transcription_completed_at = None
+        sos.save(update_fields=["transcript", "transcription_status", "transcription_completed_at"])
+
+        enqueue_transcription(latest_audio_message, latest_audio_message.audio_file.path, transcribe_func=transcription_module.transcribe_audio)
+        return Response(SOSMessageSerializer(latest_audio_message, context={"request": request}).data, status=status.HTTP_200_OK)
+
+
+class AudioTranscriptionView(APIView):
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        serializer = SpeechToTextSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {"success": False, "message": "Invalid audio upload.", "errors": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        audio_file = serializer.validated_data["audio"]
+
+        try:
+            transcript = self._transcribe_audio(audio_file)
+            return Response({"success": True, "transcript": transcript}, status=status.HTTP_200_OK)
+        except ValueError as exc:
+            return Response({"success": False, "message": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            return Response(
+                {"success": False, "message": "Unable to transcribe audio."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    def _transcribe_audio(self, audio_file):
+        audio_bytes = audio_file.read()
+        if not audio_bytes:
+            raise ValueError("Uploaded audio file is empty.")
+
+        file_name = getattr(audio_file, "name", "") or "voice-note.m4a"
+        return transcription_module.transcribe_audio(audio_bytes=audio_bytes, filename=file_name)
 
 
 class SOSAlertManagementView(APIView):
@@ -146,7 +314,7 @@ class SOSAlertManagementView(APIView):
         else:
             sos_list = SOS.objects.filter(user=request.user).order_by("-created_at")
 
-        serializer = SOSSerializer(sos_list, many=True)
+        serializer = SOSSerializer(sos_list, many=True, context={"request": request})
         return Response(serializer.data)
 
     def patch(self, request, pk):
@@ -162,7 +330,7 @@ class SOSAlertManagementView(APIView):
             serializer = SOSStatusUpdateSerializer(sos, data=request.data, partial=True)
             if serializer.is_valid():
                 serializer.save()
-                return Response(SOSSerializer(sos).data, status=status.HTTP_200_OK)
+                return Response(SOSSerializer(sos, context={"request": request}).data, status=status.HTTP_200_OK)
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         if request.user.role == "RESIDENT":
@@ -197,7 +365,7 @@ class SOSAlertManagementView(APIView):
                 updated_sos.location = geocode_payload.get("location") or updated_sos.location or ""
                 updated_sos.save(update_fields=["address", "city", "state", "country", "location"])
 
-            return Response(SOSSerializer(updated_sos).data, status=status.HTTP_200_OK)
+            return Response(SOSSerializer(updated_sos, context={"request": request}).data, status=status.HTTP_200_OK)
 
         return Response(status=status.HTTP_403_FORBIDDEN)
 

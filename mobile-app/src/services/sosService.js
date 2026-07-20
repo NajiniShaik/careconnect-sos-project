@@ -1,5 +1,100 @@
 import { api, getStoredToken, getAuthHeaders } from './authService.js';
 
+let Location = null;
+
+try {
+  Location = require('expo-location');
+} catch (error) {
+  console.log('[sos-service] expo-location unavailable', error);
+}
+
+function formatAddressParts(addressParts = []) {
+  const parts = (addressParts || []).filter(Boolean);
+  return parts.length > 0 ? parts.join(', ') : 'Address unavailable';
+}
+
+export function normalizeCoordinates(coordinates = null) {
+  if (!coordinates || typeof coordinates !== 'object') {
+    return null;
+  }
+
+  const latitude = Number(coordinates.latitude);
+  const longitude = Number(coordinates.longitude);
+
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return null;
+  }
+
+  return {
+    latitude,
+    longitude,
+  };
+}
+
+export function createMapLocationState(coordinates = null, address = '', geocodingStatus = 'ready', geocodingError = '') {
+  return {
+    coordinates: normalizeCoordinates(coordinates),
+    address: address || 'Address unavailable',
+    geocodingStatus,
+    geocodingError,
+  };
+}
+
+export function getMapRegion(coordinates = null, latitudeDelta = 0.01, longitudeDelta = 0.01) {
+  const normalizedCoordinates = normalizeCoordinates(coordinates);
+
+  if (!normalizedCoordinates) {
+    return {
+      latitude: 0,
+      longitude: 0,
+      latitudeDelta,
+      longitudeDelta,
+    };
+  }
+
+  return {
+    latitude: normalizedCoordinates.latitude,
+    longitude: normalizedCoordinates.longitude,
+    latitudeDelta,
+    longitudeDelta,
+  };
+}
+
+export async function reverseGeocodeLocation(coordinates = null) {
+  const normalizedCoordinates = normalizeCoordinates(coordinates);
+
+  if (!normalizedCoordinates || !Location?.reverseGeocodeAsync) {
+    return {
+      address: 'Address unavailable',
+      geocodingStatus: 'error',
+      geocodingError: 'Unable to resolve the address right now.',
+    };
+  }
+
+  try {
+    const geocodeResults = await Location.reverseGeocodeAsync(normalizedCoordinates);
+    const address = formatAddressParts([
+      geocodeResults?.[0]?.name,
+      geocodeResults?.[0]?.street,
+      geocodeResults?.[0]?.city,
+      geocodeResults?.[0]?.region,
+      geocodeResults?.[0]?.country,
+    ]);
+
+    return {
+      address,
+      geocodingStatus: address === 'Address unavailable' ? 'error' : 'ready',
+      geocodingError: address === 'Address unavailable' ? 'Unable to resolve the address right now.' : '',
+    };
+  } catch (error) {
+    return {
+      address: 'Address unavailable',
+      geocodingStatus: 'error',
+      geocodingError: error?.message || 'Unable to resolve the address right now.',
+    };
+  }
+}
+
 export function buildSosRequestPayload(message = 'Emergency alert triggered from mobile app', location = 'UNKNOWN', category = '', coordinates = null, priority = 'HIGH') {
   const payload = {
     message,
@@ -223,6 +318,69 @@ export async function postSosMessage(id, message) {
     return response;
   } catch (error) {
     console.log(`[sos] POST ${requestUrl} failed`, {
+      status: error?.response?.status,
+      message: error?.message,
+    });
+    throw error;
+  }
+}
+
+export async function uploadSosAudio(id, audioUri, fileName = "voice-note.m4a") {
+  const token = await getStoredToken();
+  const headers = await getAuthHeaders(token);
+  const requestUrl = `/sos/${id}/message/`;
+
+  if (!audioUri) {
+    throw new Error("No audio file available for upload.");
+  }
+
+  const formData = new FormData();
+  formData.append("message", "Voice note attached");
+  formData.append("audio", {
+    uri: audioUri,
+    name: fileName,
+    type: "audio/m4a",
+  });
+
+  console.log(`[sos] POST ${requestUrl} (audio upload)`);
+
+  try {
+    const response = await api.post(requestUrl, formData, { headers });
+    console.log(`[sos] POST ${requestUrl} (audio upload) -> ${response?.status ?? "unknown"}`);
+    return response;
+  } catch (error) {
+    console.log(`[sos] POST ${requestUrl} (audio upload) failed`, {
+      status: error?.response?.status,
+      message: error?.message,
+    });
+    throw error;
+  }
+}
+
+export async function transcribeSosAudio(audioUri, fileName = "voice-note.m4a") {
+  const token = await getStoredToken();
+  const headers = await getAuthHeaders(token);
+  const requestUrl = `/sos/transcribe/`;
+
+  if (!audioUri) {
+    throw new Error("No audio file available for transcription.");
+  }
+
+  const formData = new FormData();
+  formData.append("audio", {
+    uri: audioUri,
+    name: fileName,
+    type: "audio/m4a",
+  });
+
+  console.log(`[sos] POST ${requestUrl} (audio transcription)`);
+
+  try {
+    const response = await api.post(requestUrl, formData, { headers, timeout: 60000 });
+    console.log(`[sos] POST ${requestUrl} (audio transcription) -> ${response?.status ?? "unknown"}`);
+    return response;
+  } catch (error) {
+    console.log(`[sos] POST ${requestUrl} (audio transcription) failed`, {
       status: error?.response?.status,
       message: error?.message,
     });

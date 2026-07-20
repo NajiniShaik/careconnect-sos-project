@@ -8,6 +8,7 @@ const menuItems = [
   { name: "Residents", path: "/residents" },
   { name: "Emergency Contacts", path: "/emergency-contacts" },
   { name: "Alerts", path: "/alerts" },
+  { name: "Notification Templates", path: "/notification-templates" },
 ];
 
 export default function Sidebar() {
