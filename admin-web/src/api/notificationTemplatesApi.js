@@ -1,8 +1,12 @@
 import axios from "axios";
 
 const API = "http://127.0.0.1:8000/api/notifications";
-
 const STORAGE_KEY = "cc_notification_templates_v1";
+
+function getAuthHeaders() {
+  const token = localStorage.getItem("access");
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 function defaultTemplates() {
   return [
@@ -27,7 +31,7 @@ async function tryServerCall(fn) {
 }
 
 export async function listTemplates() {
-  const server = await tryServerCall(() => axios.get(`${API}/templates/`));
+  const server = await tryServerCall(() => axios.get(`${API}/templates/`, { headers: getAuthHeaders() }));
   if (server.ok) return server.data;
 
   // fallback to localStorage
@@ -49,7 +53,7 @@ export async function listTemplates() {
 
 export async function saveTemplate(template) {
   // optimistic: try server, else persist locally
-  const server = await tryServerCall(() => axios.put(`${API}/templates/${template.key}/`, template));
+  const server = await tryServerCall(() => axios.put(`${API}/templates/${template.key}/`, template, { headers: getAuthHeaders() }));
   if (server.ok) return server.data;
 
   const list = await listTemplates();

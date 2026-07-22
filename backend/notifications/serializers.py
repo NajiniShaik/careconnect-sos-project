@@ -10,11 +10,14 @@ class DeviceTokenSerializer(serializers.ModelSerializer):
 
 
 class RegisterDeviceSerializer(serializers.Serializer):
-    token = serializers.CharField(max_length=255, required=True)
+    device_token = serializers.CharField(max_length=255, required=False, allow_blank=False)
+    token = serializers.CharField(max_length=255, required=False, allow_blank=False)
     platform = serializers.ChoiceField(choices=[c[0] for c in DeviceToken.PLATFORM_CHOICES], required=False, default="unknown")
     device_id = serializers.CharField(max_length=255, required=False, allow_blank=True, allow_null=True)
 
-    def validate_token(self, value):
-        if not value or not str(value).strip():
-            raise serializers.ValidationError("Token cannot be blank")
-        return value.strip()
+    def validate(self, data):
+        token_value = data.get("device_token") or data.get("token")
+        if not token_value or not str(token_value).strip():
+            raise serializers.ValidationError({"device_token": "Token cannot be blank"})
+        data["device_token"] = str(token_value).strip()
+        return data

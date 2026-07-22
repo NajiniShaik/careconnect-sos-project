@@ -1,36 +1,35 @@
 import io
 import logging
-import os
 import threading
 import sys
+import requests
 from pathlib import Path
 from typing import Optional
+from huggingface_hub import InferenceClient
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
+client = InferenceClient(
+    provider="fal-ai",
+    api_key=settings.HF_API_KEY
+)
 
-def _openai_transcribe(file_obj):
-    # Lazy import so the module can be imported even when openai is not
-    # installed in the environment. This function will raise a clear
-    # RuntimeError if the package or API key is missing.
-    try:
-        from openai import OpenAI
-    except Exception as exc:  # pragma: no cover - defensive
-        raise RuntimeError("openai package not installed") from exc
+HF_MODEL="openai/whisper-tiny"
 
-    api_key = os.environ.get("OPENAI_API_KEY")
+def _hf_transcribe(file_obj):
 
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY environment variable is not set")
+    file_obj.seek(0)
 
-    client = OpenAI(api_key=api_key)
+    audio_bytes = file_obj.read()
 
-    result = client.audio.transcriptions.create(
-        model="whisper-1",
-        file=file_obj,
+    result = client.automatic_speech_recognition(
+        audio=audio_bytes,
+        model="openai/whisper-large-v3"
     )
 
-    return result.text.strip()
+    return result.text
+
 
 def transcribe_audio(audio_path: Optional[str] = None, audio_bytes: Optional[bytes] = None, filename: Optional[str] = None) -> str:
     if not audio_path and not audio_bytes:
@@ -40,14 +39,14 @@ def transcribe_audio(audio_path: Optional[str] = None, audio_bytes: Optional[byt
         file_name = filename or "audio.m4a"
         file_obj = io.BytesIO(audio_bytes)
         file_obj.name = file_name
-        return _openai_transcribe(file_obj)
+        return _hf_transcribe(file_obj)
 
     path = Path(audio_path)
     if not path.exists():
         raise FileNotFoundError(f"Audio file not found: {audio_path}")
 
     with path.open("rb") as audio_file:
-        return _openai_transcribe(audio_file)
+        return _hf_transcribe(audio_file)
   
 def enqueue_transcription(message, audio_path: Optional[str], transcribe_func=None, force_sync=None) -> None:
     callback = transcribe_func if transcribe_func is not None else transcribe_audio

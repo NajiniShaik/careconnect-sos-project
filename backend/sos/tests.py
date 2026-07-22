@@ -390,6 +390,40 @@ class SOSCategoryFlowTests(TestCase):
         self.assertEqual(response.data["message"], "Unable to transcribe audio.")
         mock_transcribe.assert_called_once()
 
+    def test_sos_creation_succeeds_even_if_email_fails(self):
+        # Ensure that if email sending fails, SOS creation still returns 200
+        self.client.force_authenticate(user=self.user)
+        with patch('notifications.services.NotificationService.send_email_notification', side_effect=Exception('Email failure')):
+            response = self.client.post(
+                "/api/sos/trigger/",
+                {
+                    "message": "Need urgent help",
+                    "location": "Block 3",
+                    "category": "medical",
+                },
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(SOS.objects.filter(user=self.user).exists())
+
+    def test_sos_creation_succeeds_even_if_sms_fails(self):
+        # Ensure that if SMS sending fails, SOS creation still returns 200
+        self.client.force_authenticate(user=self.user)
+        with patch('notifications.services.NotificationService.send_sms_notification', side_effect=Exception('SMS failure')):
+            response = self.client.post(
+                "/api/sos/trigger/",
+                {
+                    "message": "Need urgent help",
+                    "location": "Block 3",
+                    "category": "medical",
+                },
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(SOS.objects.filter(user=self.user).exists())
+
     def test_whisper_rejects_empty_audio_file(self):
         audio_file = SimpleUploadedFile(
             "voice-note.wav",

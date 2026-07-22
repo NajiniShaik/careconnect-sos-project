@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import * as Location from "expo-location";
 import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
+import { useLocalSearchParams } from "expo-router";
 import { AppButton, AppScreen, PageHeader, SectionCard, StatusBadge, appColors } from "../../components/common/designSystem";
 import { getStoredUser } from "../../services/authService";
 import { deleteSosAlert, fetchSosAlerts, fetchSosCategories, fetchSosMessages, mergeSosMessages, normalizeSosHistory, postSosMessage, resolveSosAlert, retrySosTranscription, updateSosIncident } from "../../services/sosService";
@@ -99,6 +100,7 @@ function getAlertIdentifier(alert = {}) {
 }
 
 export default function AlertsRoute() {
+  const params = useLocalSearchParams();
   const [user, setUser] = useState(null);
   const [alerts, setAlerts] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -188,6 +190,18 @@ export default function AlertsRoute() {
   const isAdmin = role === "ADMIN";
   const isSecurity = role === "SECURITY";
   const isResident = role === "RESIDENT";
+
+  useEffect(() => {
+    const selectedAlertId = String(params?.alert_id || params?.alertId || params?.alertid || "").trim();
+    if (!selectedAlertId || !alerts.length) {
+      return;
+    }
+
+    const found = alerts.some((alert) => String(getAlertIdentifier(alert)) === selectedAlertId);
+    if (found) {
+      setExpandedAlertId(selectedAlertId);
+    }
+  }, [alerts, params]);
 
   const handleResolveAlert = async (alert) => {
     const alertId = getAlertIdentifier(alert);

@@ -31,3 +31,6 @@ mobile-app/.claude/
 
 # Personal notes
 copilot_notes.md
+
+firebase/
+*.json

@@ -1,0 +1,24 @@
+<html>
+  <body>
+    <p>Dear {{ contact_name|default:"Contact" }},</p>
+    <p>This is an automated notification to inform you that <strong>{{ resident_name }}</strong> has triggered an SOS alert.</p>
+    <p>
+      <strong>Society:</strong> {{ society_name }}<br/>
+      <strong>Block:</strong> {{ block_name|default:"N/A" }}<br/>
+      <strong>Flat:</strong> {{ flat_name|default:"N/A" }}<br/>
+      <strong>Category:</strong> {{ category }}<br/>
+      <strong>Timestamp:</strong> {{ timestamp }}
+    </p>
+
+    {% if latitude and longitude %}
+      <p><a href="https://www.google.com/maps/search/?api=1&query={{ latitude }},{{ longitude }}">View on Google Maps</a></p>
+    {% endif %}
+
+    {% if message %}
+      <h3>Message</h3>
+      <p>{{ message }}</p>
+    {% endif %}
+
+    <p>Please respond if you can assist.</p>
+  </body>
+</html>

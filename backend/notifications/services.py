@@ -8,15 +8,16 @@ Use environment variables or Django settings to configure providers.
 """
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any, Dict, Iterable, List, Optional
 
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.core.mail import EmailMultiAlternatives, get_connection
 from django.template.loader import render_to_string
 from django.db import OperationalError
 from django.apps import apps
+from notifications.firebase import send_push_notification as send_fcm_push_notification
 
 logger = logging.getLogger(__name__)
 
@@ -29,59 +30,7 @@ class NotificationService:
     """
 
     def __init__(self):
-        # Lazy imports for optional dependencies
-        self._firebase_app = None
-        self._firebase_messaging = None
-        try:
-            import firebase_admin
-            from firebase_admin import credentials, messaging
-
-            self._firebase_admin = firebase_admin
-            self._firebase_credentials_class = credentials.Certificate
-            self._firebase_messaging = messaging
-        except Exception:
-            self._firebase_admin = None
-            self._firebase_credentials_class = None
-            self._firebase_messaging = None
-
-    def _init_firebase(self) -> bool:
-        """Initialize Firebase app if credentials are available.
-
-        Returns True when initialized, False otherwise.
-        """
-        if not self._firebase_admin:
-            logger.debug("Firebase admin SDK not available")
-            return False
-
-        if getattr(settings, "FCM_ENABLED", False) is False:
-            logger.debug("FCM_ENABLED is False in settings")
-            return False
-
-        # If already initialized, return True
-        if self._firebase_admin._apps:
-            return True
-
-        svc_json = getattr(settings, "FCM_SERVICE_ACCOUNT_JSON", None)
-        svc_path = getattr(settings, "FCM_SERVICE_ACCOUNT_PATH", None)
-
-        cred = None
-        try:
-            if svc_json:
-                cred_dict = json.loads(svc_json) if isinstance(svc_json, str) else svc_json
-                cred = self._firebase_credentials_class(cred_dict)
-            elif svc_path:
-                cred = self._firebase_credentials_class(svc_path)
-
-            if not cred:
-                logger.warning("Firebase credentials not configured (FCM_SERVICE_ACCOUNT_JSON/FCM_SERVICE_ACCOUNT_PATH)")
-                return False
-
-            self._firebase_admin.initialize_app(cred)
-            logger.info("Initialized Firebase Admin SDK")
-            return True
-        except Exception as exc:
-            logger.exception("Failed to initialize Firebase Admin SDK: %s", exc)
-            return False
+        self._firebase_available = True
 
     def send_push_notification(self, device_tokens: Iterable[str], title: str, body: str, data: Optional[Dict[str, Any]] = None) -> bool:
         """Send push notification via FCM to one or more device tokens.
@@ -92,7 +41,7 @@ class NotificationService:
         try:
             tokens = [t for t in (device_tokens or []) if t]
             if not tokens:
-                # Auto-load tokens from the database if available
+                # Auto-load tokens from the notifications device token table
                 try:
                     DeviceToken = apps.get_model("notifications", "DeviceToken")
                     db_tokens = DeviceToken.objects.filter().values_list("token", flat=True)
@@ -101,31 +50,27 @@ class NotificationService:
                     logger.debug("No device tokens found in DB (or DB unavailable): %s", exc)
 
             if not tokens:
+                # Also load one token per authenticated user if stored on the user profile
+                try:
+                    user_model = get_user_model()
+                    user_tokens = user_model.objects.filter(device_token__isnull=False).exclude(device_token__exact="").values_list("device_token", flat=True)
+                    tokens = [t for t in user_tokens if t]
+                except Exception as exc:
+                    logger.debug("Failed to load device tokens from user profiles: %s", exc)
+
+            if not tokens:
                 logger.debug("No device tokens provided for push notification")
                 return False
 
-            if not self._init_firebase():
-                logger.info("Skipping push: Firebase not configured")
-                return False
+            success = False
+            for token in tokens:
+                response = send_fcm_push_notification(token, title, body, data=data)
+                if response is not None:
+                    success = True
 
-            if len(tokens) == 1:
-                message = self._firebase_messaging.Message(
-                    notification=self._firebase_messaging.Notification(title=title, body=body),
-                    token=tokens[0],
-                    data={k: str(v) for k, v in (data or {}).items()},
-                )
-                resp = self._firebase_messaging.send(message)
-                logger.info("FCM send single token result: %s", resp)
-            else:
-                multicast = self._firebase_messaging.MulticastMessage(
-                    notification=self._firebase_messaging.Notification(title=title, body=body),
-                    tokens=tokens,
-                    data={k: str(v) for k, v in (data or {}).items()},
-                )
-                resp = self._firebase_messaging.send_multicast(multicast)
-                logger.info("FCM multicast success count=%s failure_count=%s", resp.success_count, resp.failure_count)
-
-            return True
+            if not success:
+                logger.info("FCM send attempted but no messages were delivered")
+            return success
         except Exception as exc:
             logger.exception("Failed to send push notification: %s", exc)
             return False
@@ -195,6 +140,7 @@ class NotificationService:
             try:
                 import requests
 
+                success = False
                 for num in numbers:
                     url = f"https://api.twilio.com/2010-04-01/Accounts/{tw_sid}/Messages.json"
                     payload = {"To": num, "From": tw_from, "Body": message}
@@ -203,9 +149,11 @@ class NotificationService:
                         logger.warning("Twilio SMS failed for %s: %s %s", num, resp.status_code, resp.text)
                     else:
                         logger.info("Twilio SMS sent to %s", num)
-                return True
+                        success = True
+                return success
             except Exception as exc:
                 logger.exception("Twilio SMS send error: %s", exc)
+                return False
 
         # Try MSG91
         msg91_key = getattr(settings, "MSG91_AUTH_KEY", None)
@@ -221,6 +169,11 @@ class NotificationService:
                 return True
             except Exception as exc:
                 logger.exception("MSG91 SMS send error: %s", exc)
+                return False
 
         logger.info("No SMS provider configured (Twilio/MSG91). Skipping SMS send.")
         return False
+
+    def send_sms(self, to_numbers: Iterable[str], message: str) -> bool:
+        """Alias for send_sms_notification to support SMS with the NotificationService."""
+        return self.send_sms_notification(to_numbers, message)

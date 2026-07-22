@@ -88,7 +88,7 @@ function App() {
       <Route
         path="/notification-templates"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute requiredRole="ADMIN">
             <NotificationTemplates />
           </ProtectedRoute>
         }

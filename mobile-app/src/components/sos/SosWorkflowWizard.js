@@ -7,18 +7,19 @@ import { RecordingPresets, requestRecordingPermissionsAsync, setAudioModeAsync, 
 import { AppButton, AppIcon, AppTextInput, appColors, StatusBadge } from "../common/designSystem";
 import { buildSosRequestPayload, createMapLocationState, fetchSosCategories, getMapRegion, normalizeCoordinates, reverseGeocodeLocation, triggerSosRequest, uploadSosAudio, transcribeSosAudio } from "../../services/sosService";
 import { getErrorMessage } from "../../services/authService";
+import { WebView } from "react-native-webview";
+
+import {
+  startWebRecording,
+  stopWebRecording,
+  playWebAudio,
+  deleteWebAudio
+} from "./webAudio";
 
 let MapView = null;
 let Marker = null;
 let UrlTile = null;
 
-if (Platform.OS !== "web") {
-  const Maps = require("react-native-maps");
-
-  MapView = Maps.default;
-  Marker = Maps.Marker;
-  UrlTile = Maps.UrlTile;
-}
 
 if (Platform.OS !== "web") {
   try {
@@ -39,6 +40,120 @@ function formatDuration(milliseconds = 0) {
   const seconds = totalSeconds % 60;
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
+
+
+function LeafletMapPicker({ coordinates, onLocationSelect, interactive = true }) {
+  if (!coordinates) return null;
+
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+      <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+      <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+      <style>
+        body, html, #map { margin: 0; padding: 0; height: 100%; width: 100%; }
+      </style>
+    </head>
+    <body>
+      <div id="map"></div>
+      <script>
+        var map = L.map('map', {
+          zoomControl: ${interactive},
+          dragging: ${interactive},
+          touchZoom: ${interactive},
+          doubleClickZoom: ${interactive},
+          scrollWheelZoom: ${interactive}
+        }).setView([${coordinates.latitude}, ${coordinates.longitude}], 15);
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 19,
+          attribution: '© OpenStreetMap'
+        }).addTo(map);
+
+        var marker = L.marker([${coordinates.latitude}, ${coordinates.longitude}], {
+          draggable: ${interactive}
+        }).addTo(map);
+
+        function notifyApp(lat, lng) {
+          var payload = JSON.stringify({ latitude: lat, longitude: lng });
+          if (window.ReactNativeWebView) {
+            window.ReactNativeWebView.postMessage(payload);
+          } else if (window.parent) {
+            window.parent.postMessage(payload, '*');
+          }
+        }
+
+        ${interactive
+      ? `
+          marker.on('dragend', function (e) {
+            var pos = e.target.getLatLng();
+            notifyApp(pos.lat, pos.lng);
+          });
+
+          map.on('click', function(e) {
+            marker.setLatLng(e.latlng);
+            notifyApp(e.latlng.lat, e.latlng.lng);
+          });
+        `
+      : ''
+    }
+      </script>
+    </body>
+    </html>
+  `;
+
+  const handleMessageData = (dataString) => {
+    try {
+      const data = typeof dataString === "string" ? JSON.parse(dataString) : dataString;
+      if (data?.latitude && data?.longitude && onLocationSelect) {
+        onLocationSelect({ latitude: data.latitude, longitude: data.longitude });
+      }
+    } catch (e) {
+      console.error("Error parsing map coordinates", e);
+    }
+  };
+
+  useEffect(() => {
+    if (Platform.OS === "web") {
+      const handleWebMessage = (event) => {
+        if (event.data) {
+          handleMessageData(event.data);
+        }
+      };
+
+      window.addEventListener("message", handleWebMessage);
+      return () => {
+        window.removeEventListener("message", handleWebMessage);
+      };
+    }
+  }, [onLocationSelect]);
+
+  if (Platform.OS === "web") {
+    return (
+      <View style={styles.mapPreviewWrap}>
+        <iframe
+          srcDoc={htmlContent}
+          style={{ width: "100%", height: "220px", border: "none" }}
+          title="Interactive Leaflet Map"
+        />
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.mapPreviewWrap}>
+      <WebView
+        originWhitelist={["*"]}
+        source={{ html: htmlContent }}
+        onMessage={(event) => handleMessageData(event.nativeEvent.data)}
+        style={styles.mapPreview}
+      />
+    </View>
+  );
+}
+
 
 export default function SosWorkflowWizard({ user, onClose }) {
   const router = useRouter();
@@ -62,14 +177,19 @@ export default function SosWorkflowWizard({ user, onClose }) {
   const [explicitRecordingUri, setExplicitRecordingUri] = useState("");
   const [recordingDeleted, setRecordingDeleted] = useState(false);
   const [selectedLocationState, setSelectedLocationState] = useState(() => createMapLocationState(null));
+  const webStreamRef = useRef(null);
+  const [isWebRecording, setIsWebRecording] = useState(false);
 
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const recorderState = useAudioRecorderState(recorder, 250);
-  const isRecording = Boolean(recorderState?.isRecording);
+  const isRecording = Platform.OS === "web"
+    ? isWebRecording
+    : Boolean(recorderState?.isRecording);
 
   const player = useAudioPlayer(null);
   const playerStatus = useAudioPlayerStatus(player);
   const mapRef = useRef(null);
+
 
   // While actively recording, recorderState.uri/url can already be populated
   // by the native module before the file is finalized. If we let that flow
@@ -469,8 +589,32 @@ export default function SosWorkflowWizard({ user, onClose }) {
 
   const handleToggleRecording = useCallback(async () => {
     if (Platform.OS === "web") {
-      setRecordingError("Voice recording is not available on web yet.");
-      return;
+      if (isRecording) {
+        // Stopping web recording
+        const audioUrl = await stopWebRecording(webStreamRef.current);
+        webStreamRef.current = null;
+        setIsWebRecording(false); // <--- TURN OFF WEB RECORDING UI
+
+        if (audioUrl) {
+          setExplicitRecordingUri(audioUrl);
+          setRecordingDeleted(false);
+          setRecordingError("");
+        }
+        return;
+      } else {
+        // Starting web recording
+        const result = await startWebRecording();
+        if (result.success) {
+          webStreamRef.current = result.stream;
+          setIsWebRecording(true); // <--- TURN ON WEB RECORDING UI
+          setExplicitRecordingUri("");
+          setRecordingDeleted(false);
+          setRecordingError("");
+        } else {
+          setRecordingError(result.error);
+        }
+        return;
+      }
     }
 
     if (isRecording) {
@@ -541,6 +685,14 @@ export default function SosWorkflowWizard({ user, onClose }) {
   }, [isRecording, player, playerStatus, recorder, recorderState]);
 
   const handlePlayRecording = useCallback(async () => {
+    if (Platform.OS === "web") {
+      if (!effectiveRecordingUri) return;
+      playWebAudio(effectiveRecordingUri, () => {
+        // optional reset when playback finishes
+      });
+      return;
+    }
+
     if (!effectiveRecordingUri) {
       setRecordingError("No recording found.");
       return;
@@ -698,246 +850,221 @@ export default function SosWorkflowWizard({ user, onClose }) {
                 <Text style={styles.summaryValue}>{locationState.coordinates.longitude.toFixed(6)}</Text>
               </View>
 
-              {Platform.OS === "web" ? (
-                previewUri ? <Image source={{ uri: previewUri }} style={styles.mapPreview} resizeMode="cover" /> : null
-              ) : MapView && Marker && UrlTile ? (
-                <View style={styles.mapPreviewWrap}>
-                  <MapView
-                    style={styles.mapPreview}
-                    mapType="none"
-                    region={{
-                      latitude: locationState.coordinates.latitude,
-                      longitude: locationState.coordinates.longitude,
-                      latitudeDelta: 0.01,
-                      longitudeDelta: 0.01,
-                    }}
-                    scrollEnabled={false}
-                    zoomEnabled={false}
-                  >
-                    <UrlTile
-                      urlTemplate="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                      flipY={false}
-                      maximumZ={19}
-                      zIndex={-1}
-                    />
-                    <Marker coordinate={locationState.coordinates} />
-                  </MapView>
-                </View>
-              ) : (
-                previewUri ? <Image source={{ uri: previewUri }} style={styles.mapPreview} resizeMode="cover" /> : null
-              )}
+              <LeafletMapPicker
+                coordinates={locationState.coordinates}
+                interactive={true}
+                onLocationSelect={(coords) => void handleMapLocationSelection(coords)}
+              />
             </>
           ) : null}
+
+
+
+
+
 
           <View style={styles.actionsRow}>
             <AppButton title="Refresh Location" onPress={() => void loadLocation(true)} variant="secondary" />
             <AppButton title="Confirm Location" onPress={() => setCurrentStep(3)} disabled={!locationState.coordinates} />
           </View>
         </View>
-      ) : null}
+      ) : null
+      }
 
-      {currentStep === 3 ? (
-        <View style={styles.cardBody}>
-          <View style={styles.iconWrap}>
-            <AppIcon name="warning-outline" size={26} color={appColors.red} />
-          </View>
-          <Text style={styles.title}>Describe Emergency</Text>
-          <Text style={styles.bodyText}>Add the details that responders should see first.</Text>
-
-          <AppTextInput label="Emergency description" multiline numberOfLines={5} value={description} onChangeText={(value) => setDescription(value.slice(0, 500))} style={styles.descriptionInput} />
-
-          <View style={styles.fieldBlock}>
-            <Text style={styles.fieldLabel}>SOS category</Text>
-            <View style={styles.optionWrap}>
-              {categories.map((item) => {
-                const selected = selectedCategory === item.value;
-                return (
-                  <Pressable key={item.value} style={[styles.optionChip, selected ? styles.optionChipSelected : null]} onPress={() => setSelectedCategory(item.value)}>
-                    <Text style={[styles.optionText, selected ? styles.optionTextSelected : null]}>{item.label}</Text>
-                  </Pressable>
-                );
-              })}
+      {
+        currentStep === 3 ? (
+          <View style={styles.cardBody}>
+            <View style={styles.iconWrap}>
+              <AppIcon name="warning-outline" size={26} color={appColors.red} />
             </View>
-          </View>
+            <Text style={styles.title}>Describe Emergency</Text>
+            <Text style={styles.bodyText}>Add the details that responders should see first.</Text>
 
-          <View style={styles.fieldBlock}>
-            <Text style={styles.fieldLabel}>Severity</Text>
-            <View style={styles.optionWrap}>
-              {severityOptions.map((option) => {
-                const selected = severity === option;
-                return (
-                  <Pressable key={option} style={[styles.optionChip, selected ? styles.optionChipSelected : null]} onPress={() => setSeverity(option)}>
-                    <Text style={[styles.optionText, selected ? styles.optionTextSelected : null]}>{option}</Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          </View>
+            <AppTextInput label="Emergency description" multiline numberOfLines={5} value={description} onChangeText={(value) => setDescription(value.slice(0, 500))} style={styles.descriptionInput} />
 
-          <View style={styles.placeholderBox}>
-            <Pressable
-              style={[styles.recordButton, isRecording ? styles.recordButtonActive : null]}
-              onPress={() => void handleToggleRecording()}
-              accessibilityRole="button"
-              accessibilityLabel={isRecording ? "Stop recording" : "Start recording"}
-            >
-              <AppIcon name="mic-outline" size={18} color={isRecording ? appColors.white : appColors.muted} />
-            </Pressable>
-            <View style={styles.placeholderTextWrap}>
-              <Text style={styles.placeholderText}>{isRecording ? "Recording…" : effectiveRecordingUri ? "Recording saved locally" : "Tap to record a voice note for this SOS."}</Text>
-              {recordingDurationMs > 0 ? <Text style={styles.recordingMeta}>Duration: {formatDuration(recordingDurationMs)}</Text> : null}
-              {recordingError ? <Text style={styles.recordingError}>{recordingError}</Text> : null}
-            </View>
-          </View>
-
-          {effectiveRecordingUri ? (
-            <View style={styles.recordingActions}>
-              <AppButton
-                title={playbackActive ? "Pause" : "Play recording"}
-                onPress={() => void handlePlayRecording()}
-                variant="secondary"
-              />
-
-              <AppButton
-                title="Delete"
-                onPress={() => void handleDeleteRecording()}
-                variant="ghost"
-              />
-            </View>
-          ) : null}
-
-          <View style={styles.actionsRow}>
-            <AppButton title="Back" variant="secondary" onPress={() => setCurrentStep(2)} />
-            <AppButton title="Review SOS" onPress={() => setCurrentStep(4)} disabled={!selectedCategory} />
-          </View>
-        </View>
-      ) : null}
-
-      {currentStep === 4 ? (
-        <View style={styles.cardBody}>
-          <View style={styles.iconWrap}>
-            <AppIcon name="clipboard-outline" size={26} color={appColors.blue} />
-          </View>
-          <Text style={styles.title}>Review SOS</Text>
-          <Text style={styles.bodyText}>Check the details before sending your emergency alert.</Text>
-
-          <View style={styles.summaryBox}>
-            <Text style={styles.summaryLabel}>SOS category</Text>
-            <Text style={styles.summaryValue}>{categories.find((item) => item.value === selectedCategory)?.label || selectedCategory || "Not selected"}</Text>
-            <Text style={styles.summaryLabel}>Severity</Text>
-            <Text style={styles.summaryValue}>{severity}</Text>
-            <Text style={styles.summaryLabel}>Description</Text>
-            <Text style={styles.summaryValue}>{description.trim() || "Emergency alert triggered from mobile app"}</Text>
-          </View>
-
-          {locationState.coordinates ? (
-            <>
-              <View style={styles.mapPreviewWrap}>
-                {Platform.OS === "web" ? (
-                  previewUri ? <Image source={{ uri: previewUri }} style={styles.mapPreview} resizeMode="cover" /> : null
-                ) : MapView && Marker && UrlTile ? (
-                  <MapView
-                    ref={mapRef}
-                    mapType="none"
-                    style={styles.mapPreview}
-                    region={getMapRegion(selectedLocationState.coordinates || locationState.coordinates)}
-                    onPress={(event) => void handleMapLocationSelection(event.nativeEvent.coordinate)}
-                  >
-                    <UrlTile
-                      urlTemplate="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                      flipY={false}
-                      maximumZ={19}
-                      zIndex={-1}
-                    />
-                    <Marker
-                      coordinate={selectedLocationState.coordinates || locationState.coordinates}
-                      draggable
-                      onDragEnd={(event) => void handleMapLocationSelection(event.nativeEvent.coordinate)}
-                    />
-                  </MapView>
-                ) : (
-                  previewUri ? <Image source={{ uri: previewUri }} style={styles.mapPreview} resizeMode="cover" /> : null
-                )}
+            <View style={styles.fieldBlock}>
+              <Text style={styles.fieldLabel}>SOS category</Text>
+              <View style={styles.optionWrap}>
+                {categories.map((item) => {
+                  const selected = selectedCategory === item.value;
+                  return (
+                    <Pressable key={item.value} style={[styles.optionChip, selected ? styles.optionChipSelected : null]} onPress={() => setSelectedCategory(item.value)}>
+                      <Text style={[styles.optionText, selected ? styles.optionTextSelected : null]}>{item.label}</Text>
+                    </Pressable>
+                  );
+                })}
               </View>
-
-              <View style={styles.summaryBox}>
-                <Text style={styles.summaryLabel}>Current Address</Text>
-                <Text style={styles.summaryValue}>{selectedLocationState.address || locationState.address || "Address unavailable"}</Text>
-                <Text style={styles.summaryLabel}>Latitude</Text>
-                <Text style={styles.summaryValue}>{(selectedLocationState.coordinates || locationState.coordinates)?.latitude?.toFixed(6) || "Unavailable"}</Text>
-                <Text style={styles.summaryLabel}>Longitude</Text>
-                <Text style={styles.summaryValue}>{(selectedLocationState.coordinates || locationState.coordinates)?.longitude?.toFixed(6) || "Unavailable"}</Text>
-              </View>
-
-              {selectedLocationState.geocodingStatus === "loading" ? (
-                <View style={styles.loadingBox}>
-                  <ActivityIndicator size="small" color={appColors.blue} />
-                  <Text style={styles.loadingText}>Resolving address…</Text>
-                </View>
-              ) : null}
-
-              {selectedLocationState.geocodingStatus === "error" ? (
-                <Text style={styles.errorText}>{selectedLocationState.geocodingError || "Unable to resolve the address."}</Text>
-              ) : null}
-            </>
-          ) : null}
-
-          <View style={styles.actionsRow}>
-            <AppButton title="Retry address" variant="secondary" onPress={() => void handleAddressRetry()} disabled={selectedLocationState.geocodingStatus === "loading"} />
-            <AppButton title="Edit" variant="secondary" onPress={() => setCurrentStep(3)} />
-          </View>
-
-          {submitError ? <Text style={styles.errorText}>{submitError}</Text> : null}
-          {transcribing ? (
-            <View style={styles.loadingBox}>
-              <ActivityIndicator size="small" color={appColors.blue} />
-              <Text style={styles.loadingText}>Converting voice to text...</Text>
             </View>
-          ) : null}
 
-          <View style={styles.actionsRow}>
-            <AppButton title="Edit" variant="secondary" onPress={() => setCurrentStep(3)} />
-            <AppButton title={sending ? "Sending…" : "Confirm & Send SOS"} onPress={() => void handleSubmit()} loading={sending || transcribing} disabled={!canSubmit || sending || transcribing} />
+            <View style={styles.fieldBlock}>
+              <Text style={styles.fieldLabel}>Severity</Text>
+              <View style={styles.optionWrap}>
+                {severityOptions.map((option) => {
+                  const selected = severity === option;
+                  return (
+                    <Pressable key={option} style={[styles.optionChip, selected ? styles.optionChipSelected : null]} onPress={() => setSeverity(option)}>
+                      <Text style={[styles.optionText, selected ? styles.optionTextSelected : null]}>{option}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+
+            <View style={styles.placeholderBox}>
+              <Pressable
+                style={[styles.recordButton, isRecording ? styles.recordButtonActive : null]}
+                onPress={() => void handleToggleRecording()}
+                accessibilityRole="button"
+                accessibilityLabel={isRecording ? "Stop recording" : "Start recording"}
+              >
+                <AppIcon name="mic-outline" size={18} color={isRecording ? appColors.white : appColors.muted} />
+              </Pressable>
+              <View style={styles.placeholderTextWrap}>
+                <Text style={styles.placeholderText}>{isRecording ? "Recording…" : effectiveRecordingUri ? "Recording saved locally" : "Tap to record a voice note for this SOS."}</Text>
+                {recordingDurationMs > 0 ? <Text style={styles.recordingMeta}>Duration: {formatDuration(recordingDurationMs)}</Text> : null}
+                {recordingError ? <Text style={styles.recordingError}>{recordingError}</Text> : null}
+              </View>
+            </View>
+
+            {effectiveRecordingUri ? (
+              <View style={styles.recordingActions}>
+                <AppButton
+                  title={playbackActive ? "Pause" : "Play recording"}
+                  onPress={() => void handlePlayRecording()}
+                  variant="secondary"
+                />
+
+                <AppButton
+                  title="Delete"
+                  onPress={() => void handleDeleteRecording()}
+                  variant="ghost"
+                />
+              </View>
+            ) : null}
+
+            <View style={styles.actionsRow}>
+              <AppButton title="Back" variant="secondary" onPress={() => setCurrentStep(2)} />
+              <AppButton title="Review SOS" onPress={() => setCurrentStep(4)} disabled={!selectedCategory} />
+            </View>
           </View>
-        </View>
-      ) : null}
+        ) : null
+      }
 
-      {currentStep === 5 ? (
-        <View style={styles.cardBody}>
-          <View style={styles.iconWrap}>
-            <AppIcon name="checkmark-circle-outline" size={26} color={appColors.green} />
-          </View>
-          <Text style={styles.title}>SOS Sent Successfully</Text>
-          <Text style={styles.bodyText}>Your emergency request has been submitted.</Text>
+      {
+        currentStep === 4 ? (
+          <View style={styles.cardBody}>
+            <View style={styles.iconWrap}>
+              <AppIcon name="clipboard-outline" size={26} color={appColors.blue} />
+            </View>
+            <Text style={styles.title}>Review SOS</Text>
+            <Text style={styles.bodyText}>Check the details before sending your emergency alert.</Text>
 
-          {submissionResult ? (
             <View style={styles.summaryBox}>
-              <Text style={styles.summaryLabel}>Incident ID</Text>
-              <Text style={styles.summaryValue}>{submissionResult.id ?? "Pending"}</Text>
-              <Text style={styles.summaryLabel}>Status</Text>
-              <Text style={styles.summaryValue}>{submissionResult.status}</Text>
-              {submissionResult.attachmentStatus === "attached" ? (
-                <>
-                  <Text style={styles.summaryLabel}>Voice note</Text>
-                  <Text style={styles.summaryValue}>Attached to the incident timeline.</Text>
-                </>
-              ) : null}
-              {submissionResult.attachmentStatus === "failed" ? (
-                <>
-                  <Text style={styles.summaryLabel}>Voice note</Text>
-                  <Text style={styles.errorText}>{submissionResult.attachmentError || "The voice note could not be attached."}</Text>
-                </>
-              ) : null}
+              <Text style={styles.summaryLabel}>SOS category</Text>
+              <Text style={styles.summaryValue}>{categories.find((item) => item.value === selectedCategory)?.label || selectedCategory || "Not selected"}</Text>
+              <Text style={styles.summaryLabel}>Severity</Text>
+              <Text style={styles.summaryValue}>{severity}</Text>
+              <Text style={styles.summaryLabel}>Description</Text>
+              <Text style={styles.summaryValue}>{description.trim() || "Emergency alert triggered from mobile app"}</Text>
             </View>
-          ) : null}
 
-          <View style={styles.actionsRow}>
-            <AppButton title="View in Alerts" onPress={() => router.push("/alerts")} variant="secondary" />
-            <AppButton title="Done" onPress={() => onClose?.()} />
+
+
+
+            {locationState.coordinates ? (
+              <>
+
+                <LeafletMapPicker
+                  coordinates={selectedLocationState.coordinates || locationState.coordinates}
+                  interactive={true}
+                  onLocationSelect={(coords) => void handleMapLocationSelection(coords)}
+                />
+
+                <View style={styles.summaryBox}>
+                  <Text style={styles.summaryLabel}>Current Address</Text>
+                  <Text style={styles.summaryValue}>{selectedLocationState.address || locationState.address || "Address unavailable"}</Text>
+                  <Text style={styles.summaryLabel}>Latitude</Text>
+                  <Text style={styles.summaryValue}>{(selectedLocationState.coordinates || locationState.coordinates)?.latitude?.toFixed(6) || "Unavailable"}</Text>
+                  <Text style={styles.summaryLabel}>Longitude</Text>
+                  <Text style={styles.summaryValue}>{(selectedLocationState.coordinates || locationState.coordinates)?.longitude?.toFixed(6) || "Unavailable"}</Text>
+                </View>
+
+                {selectedLocationState.geocodingStatus === "loading" ? (
+                  <View style={styles.loadingBox}>
+                    <ActivityIndicator size="small" color={appColors.blue} />
+                    <Text style={styles.loadingText}>Resolving address…</Text>
+                  </View>
+                ) : null}
+
+                {selectedLocationState.geocodingStatus === "error" ? (
+                  <Text style={styles.errorText}>{selectedLocationState.geocodingError || "Unable to resolve the address."}</Text>
+                ) : null}
+              </>
+            ) : null}
+
+
+
+
+
+            <View style={styles.actionsRow}>
+              <AppButton title="Retry address" variant="secondary" onPress={() => void handleAddressRetry()} disabled={selectedLocationState.geocodingStatus === "loading"} />
+              <AppButton title="Edit" variant="secondary" onPress={() => setCurrentStep(3)} />
+            </View>
+
+            {submitError ? <Text style={styles.errorText}>{submitError}</Text> : null}
+            {transcribing ? (
+              <View style={styles.loadingBox}>
+                <ActivityIndicator size="small" color={appColors.blue} />
+                <Text style={styles.loadingText}>Converting voice to text...</Text>
+              </View>
+            ) : null}
+
+            <View style={styles.actionsRow}>
+              <AppButton title="Edit" variant="secondary" onPress={() => setCurrentStep(3)} />
+              <AppButton title={sending ? "Sending…" : "Confirm & Send SOS"} onPress={() => void handleSubmit()} loading={sending || transcribing} disabled={!canSubmit || sending || transcribing} />
+            </View>
           </View>
-        </View>
-      ) : null}
-    </View>
+        ) : null
+      }
+
+      {
+        currentStep === 5 ? (
+          <View style={styles.cardBody}>
+            <View style={styles.iconWrap}>
+              <AppIcon name="checkmark-circle-outline" size={26} color={appColors.green} />
+            </View>
+            <Text style={styles.title}>SOS Sent Successfully</Text>
+            <Text style={styles.bodyText}>Your emergency request has been submitted.</Text>
+
+            {submissionResult ? (
+              <View style={styles.summaryBox}>
+                <Text style={styles.summaryLabel}>Incident ID</Text>
+                <Text style={styles.summaryValue}>{submissionResult.id ?? "Pending"}</Text>
+                <Text style={styles.summaryLabel}>Status</Text>
+                <Text style={styles.summaryValue}>{submissionResult.status}</Text>
+                {submissionResult.attachmentStatus === "attached" ? (
+                  <>
+                    <Text style={styles.summaryLabel}>Voice note</Text>
+                    <Text style={styles.summaryValue}>Attached to the incident timeline.</Text>
+                  </>
+                ) : null}
+                {submissionResult.attachmentStatus === "failed" ? (
+                  <>
+                    <Text style={styles.summaryLabel}>Voice note</Text>
+                    <Text style={styles.errorText}>{submissionResult.attachmentError || "The voice note could not be attached."}</Text>
+                  </>
+                ) : null}
+              </View>
+            ) : null}
+
+            <View style={styles.actionsRow}>
+              <AppButton title="View in Alerts" onPress={() => router.push("/alerts")} variant="secondary" />
+              <AppButton title="Done" onPress={() => onClose?.()} />
+            </View>
+          </View>
+        ) : null
+      }
+    </View >
   );
 }
 

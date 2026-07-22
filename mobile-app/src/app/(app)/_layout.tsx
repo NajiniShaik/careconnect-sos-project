@@ -31,12 +31,18 @@ export default function AppLayout() {
       const perm = await notificationService.requestNotificationPermission();
       if ((perm && perm.status === "granted") || perm.status === "granted") {
         try {
-          const expoToken = await notificationService.getExpoPushTokenAsync();
+          await notificationService.retryPendingDeviceRegistration();
+        } catch (err) {
+          // ignore pending retry errors
+        }
+
+        try {
+          const deviceToken = await notificationService.getExpoPushTokenAsync();
           const platform = (Device.osName || Platform.OS || "unknown").toLowerCase();
-          const deviceId = `${Device.modelName || "device"}-${Date.now()}`;
-          if (expoToken) {
+          const deviceId = await notificationService.getNotificationDeviceId();
+          if (deviceToken) {
             try {
-              await notificationService.registerDeviceWithBackend({ token: expoToken, platform: platform, device_id: deviceId });
+              await notificationService.registerDeviceWithBackend({ token: deviceToken, platform, device_id: deviceId });
             } catch (err) {
               // register failed - will retry later
             }
@@ -62,9 +68,11 @@ export default function AppLayout() {
         onResponse: (r) => {
           // navigate on tap
           const data = r.notification.request.content.data || {};
-          const target = data?.target || null;
+          const trimmedAlertId = data?.alert_id || data?.alertId || data?.alertid || null;
+          const target =
+            data?.target ||
+            (data?.type === "SOS" && trimmedAlertId ? `/alerts?alert_id=${trimmedAlertId}` : null);
           if (target) {
-            // use router to navigate
             try {
               router.push(target);
             } catch (e) {

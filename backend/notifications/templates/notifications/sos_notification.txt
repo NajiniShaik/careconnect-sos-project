@@ -1,3 +1,29 @@
+Emergency SOS Alert
+
+Resident: {{ resident_name }}
+Society: {{ society_name }}
+Block: {{ block_name|default:"N/A" }}
+Flat: {{ flat_name|default:"N/A" }}
+Category: {{ category }}
+Severity: {{ severity }}
+Address: {{ address }}
+Timestamp: {{ timestamp }}
+
+{% if latitude and longitude %}
+Location: https://www.google.com/maps/search/?api=1&query={{ latitude }},{{ longitude }}
+{% endif %}
+
+{% if message %}
+Message:
+{{ message }}
+{% endif %}
+
+{% if transcript %}
+Voice transcription:
+{{ transcript }}
+{% endif %}
+
+This is an automated notification from CareConnect.
 SOS Alert
 
 Resident: {{ resident_name }}

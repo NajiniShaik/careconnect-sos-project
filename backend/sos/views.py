@@ -15,6 +15,7 @@ from .utils import reverse_geocode_coordinates
 from users.permissions import IsAdmin, IsResident, IsSecurity
 from django.contrib.auth import get_user_model
 from notifications.services import NotificationService
+from notifications.models import DeviceToken
 import logging
 from typing import List
 
@@ -107,6 +108,7 @@ class CreateSOSView(APIView):
             }
 
             # Email recipients: admins and security users for the society (best-effort)
+            admin_qs = None
             try:
                 admin_qs = User.objects.filter(role__in=["ADMIN", "SECURITY"])
                 if society_name:
@@ -115,8 +117,14 @@ class CreateSOSView(APIView):
             except Exception:
                 admin_emails = []
 
-            # SMS recipients: emergency contacts (resident profile)
+            # SMS recipients: admins/security plus emergency contacts
             sms_numbers = []
+            try:
+                if admin_qs is not None:
+                    sms_numbers.extend([u.phone for u in admin_qs if getattr(u, "phone", None)])
+            except Exception:
+                pass
+
             try:
                 profile = getattr(request.user, "resident_profile", None)
                 if profile:
@@ -124,13 +132,44 @@ class CreateSOSView(APIView):
                         if getattr(ec, "phone", None):
                             sms_numbers.append(ec.phone)
             except Exception:
-                sms_numbers = []
+                pass
 
-            # FCM device tokens: this project currently does not store device
-            # tokens centrally; if you have tokens, pass them here.
+            sms_numbers = [str(num).strip() for num in set(sms_numbers) if num and str(num).strip()]
+
             device_tokens: List[str] = []
+            try:
+                admin_qs = User.objects.filter(role__in=["ADMIN", "SECURITY"])
+                if society_name:
+                    admin_qs = admin_qs.filter(resident_profile__society__name=society_name)
+
+                profile_tokens = [u.device_token for u in admin_qs if getattr(u, "device_token", None)]
+                record_tokens = []
+                try:
+                    record_tokens = list(DeviceToken.objects.filter(user__in=admin_qs).values_list("token", flat=True))
+                except Exception:
+                    record_tokens = []
+
+                device_tokens = [t for t in set(profile_tokens + [t for t in record_tokens if t]) if t]
+            except Exception:
+                device_tokens = []
 
             # Fire off notifications (best-effort)
+            try:
+                if device_tokens:
+                    notif.send_push_notification(
+                        device_tokens,
+                        "Emergency SOS Alert",
+                        f"{resident_name} has triggered an SOS.",
+                        data={
+                            "type": "SOS",
+                            "alert_id": str(sos.id),
+                            "resident_id": str(request.user.id),
+                        },
+                    )
+            except Exception:
+                logger = logging.getLogger(__name__)
+                logger.exception("Failed to send SOS push notifications")
+
             try:
                 if admin_emails:
                     notif.send_email_notification(admin_emails, "SOS Alert: %s" % (sos.category or "SOS"), "notifications/sos_notification", context)
@@ -140,17 +179,65 @@ class CreateSOSView(APIView):
 
             try:
                 if sms_numbers:
-                    notif.send_sms_notification(sms_numbers, f"SOS: {sos.category or 'SOS'} at {context['address']}")
+                    block_name = ""
+                    flat_name = ""
+                    try:
+                        profile = getattr(request.user, "resident_profile", None)
+                        if profile and getattr(profile, "block", None):
+                            block_name = profile.block.name or ""
+                        if profile and getattr(profile, "flat", None):
+                            flat_name = getattr(profile.flat, "flat_number", "")
+                    except Exception:
+                        block_name = ""
+                        flat_name = ""
+
+                    coords = ""
+                    if sos.latitude is not None and sos.longitude is not None:
+                        coords = f" https://www.google.com/maps/search/?api=1&query={sos.latitude},{sos.longitude}"
+
+                    sms_message = (
+                        f"Emergency SOS Alert. Resident: {resident_name}. Society: {society_name or 'N/A'}. "
+                        f"Block: {block_name or 'N/A'}. Flat: {flat_name or 'N/A'}. "
+                        f"Emergency Type: {sos.category or 'SOS'}. Time: {context['timestamp']}."
+                    )
+                    if coords:
+                        sms_message += f" Location:{coords}"
+                    if len(sms_message) > 320:
+                        sms_message = sms_message[:317] + "..."
+
+                    notif.send_sms_notification(sms_numbers, sms_message)
             except Exception:
                 logger = logging.getLogger(__name__)
                 logger.exception("Failed to send SOS SMS notifications")
 
+            # Also send emails to emergency contacts if they have an email address.
             try:
-                if device_tokens:
-                    notif.send_push_notification(device_tokens, f"SOS: {sos.category or 'SOS'}", context["message"] or "New SOS alert", data={"sos_id": str(sos.id)})
+                contact_emails = []
+                try:
+                    profile = getattr(request.user, "resident_profile", None)
+                    if profile:
+                        for ec in getattr(profile, "emergency_contacts", []).all():
+                            email = getattr(ec, "email", None) or getattr(ec, "contact_email", None)
+                            if email:
+                                contact_emails.append(email)
+                except Exception:
+                    contact_emails = []
+
+                if contact_emails:
+                    try:
+                        notif.send_email_notification(
+                            contact_emails,
+                            "Emergency SOS Alert",
+                            "notifications/emergency_contact_notification",
+                            {**context, "contact_name": "Emergency Contact"},
+                        )
+                    except Exception:
+                        logger = logging.getLogger(__name__)
+                        logger.exception("Failed to send SOS emails to emergency contacts")
             except Exception:
+                # Ensure any email-related errors do not interrupt SOS creation
                 logger = logging.getLogger(__name__)
-                logger.exception("Failed to send SOS push notifications")
+                logger.exception("Unexpected error while sending emergency contact emails")
         except Exception:
             # Ensure notifications cannot break the primary flow
             import logging as _logging

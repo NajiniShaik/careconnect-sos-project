@@ -12,6 +12,7 @@ class User(AbstractUser):
 
     role = models.CharField(max_length=20, choices=Role.choices, default=Role.RESIDENT)
     phone = models.CharField(max_length=15, blank=True, null=True)
+    device_token = models.CharField(max_length=255, blank=True, null=True, db_index=True)
     is_verified = models.BooleanField(default=False)
 
     def __str__(self):

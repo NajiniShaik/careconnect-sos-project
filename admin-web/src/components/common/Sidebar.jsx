@@ -1,5 +1,7 @@
 import { Link, useLocation } from "react-router-dom";
 
+const role = (localStorage.getItem("role") || "").toUpperCase();
+
 const menuItems = [
   { name: "Dashboard", path: "/dashboard" },
   { name: "Society", path: "/societies" },
@@ -8,7 +10,7 @@ const menuItems = [
   { name: "Residents", path: "/residents" },
   { name: "Emergency Contacts", path: "/emergency-contacts" },
   { name: "Alerts", path: "/alerts" },
-  { name: "Notification Templates", path: "/notification-templates" },
+  ...(role === "ADMIN" ? [{ name: "Notification Templates", path: "/notification-templates" }] : []),
 ];
 
 export default function Sidebar() {

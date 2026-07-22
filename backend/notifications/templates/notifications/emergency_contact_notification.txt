@@ -1,0 +1,23 @@
+Emergency Notification for Contact
+
+Dear {{ contact_name|default:"Contact" }},
+
+This is an automated notification to inform you that {{ resident_name }} has triggered an SOS alert.
+
+Details:
+Society: {{ society_name }}
+Block: {{ block_name|default:"N/A" }}
+Flat: {{ flat_name|default:"N/A" }}
+Category: {{ category }}
+Timestamp: {{ timestamp }}
+
+{% if latitude and longitude %}
+Location: https://www.google.com/maps/search/?api=1&query={{ latitude }},{{ longitude }}
+{% endif %}
+
+{% if message %}
+Message:
+{{ message }}
+{% endif %}
+
+Please respond if you can assist.
