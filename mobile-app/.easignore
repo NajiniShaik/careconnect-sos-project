@@ -1,9 +1,8 @@
-node_modules
-.expo
-android
-ios
-dist
+.expo/
+node_modules/
+android/
+ios/
+dist/
 .claude
-scripts
-assets/*.psd
-*.log
+.claude
+.git

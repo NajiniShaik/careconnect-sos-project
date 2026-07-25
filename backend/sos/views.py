@@ -1,24 +1,73 @@
-from django.db import transaction
-from django.shortcuts import render 
-from .serializers import SOSSerializer, SOSStatusUpdateSerializer, SOSResidentUpdateSerializer, SOSMessageCreateSerializer, SOSMessageSerializer, SpeechToTextSerializer
+import logging
+import re
+from typing import List
 
-# Create your views here.
+from django.conf import settings
+from django.db import transaction
+from django.shortcuts import render
+from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.parsers import MultiPartParser, FormParser
+
+from .serializers import SOSSerializer, SOSStatusUpdateSerializer, SOSResidentUpdateSerializer, SOSMessageCreateSerializer, SOSMessageSerializer, SpeechToTextSerializer
 from .models import SOS, SOSMessage
 from . import transcription as transcription_module
 from .transcription import enqueue_transcription
 from .utils import reverse_geocode_coordinates
 from users.permissions import IsAdmin, IsResident, IsSecurity
-from django.contrib.auth import get_user_model
-from notifications.services import NotificationService
-from notifications.models import DeviceToken
-import logging
-from typing import List
+from notifications.models import DeviceToken, Notification
+from notifications.tasks import send_push_notification_task, send_email_notification_task, send_sms_notification_task
 
+logger = logging.getLogger(__name__)
+
+
+def _normalize_phone_number(phone_number):
+    if not phone_number:
+        return None
+
+    value = str(phone_number).strip()
+    if not value:
+        return None
+
+    if value.startswith("+"):
+        normalized = "+" + re.sub(r"[^\d]", "", value[1:])
+    else:
+        normalized = re.sub(r"\D", "", value)
+
+    if not normalized:
+        return None
+
+    if normalized.startswith("+"):
+        return normalized if 8 <= len(normalized) <= 16 else None
+
+    if normalized.startswith("0") and len(normalized) == 11:
+        normalized = normalized[1:]
+
+    if len(normalized) == 10:
+        return f"+91{normalized}"
+    if len(normalized) == 12 and normalized.startswith("91"):
+        return f"+{normalized}"
+    if 7 <= len(normalized) <= 15:
+        return f"+{normalized}"
+
+    return None
+
+
+def _get_society_admin_queryset(user_model, society_name):
+    queryset = user_model.objects.filter(role__in=["ADMIN", "SECURITY"])
+    if society_name:
+        society_queryset = queryset.filter(resident_profile__society__name=society_name)
+        if society_queryset.exists():
+            return society_queryset
+    return queryset
+
+
+def _get_fallback_email_recipients():
+    recipient = getattr(settings, "EMAIL_HOST_USER", None) or getattr(settings, "DEFAULT_FROM_EMAIL", None)
+    return [recipient] if recipient else []
 
 
 class SOSCategoriesView(APIView):
@@ -81,7 +130,6 @@ class CreateSOSView(APIView):
         # failures affect the core SOS creation flow.
         try:
             User = get_user_model()
-            notif = NotificationService()
 
             resident_name = getattr(request.user, "get_full_name", None)
             try:
@@ -108,20 +156,21 @@ class CreateSOSView(APIView):
             }
 
             # Email recipients: admins and security users for the society (best-effort)
-            admin_qs = None
-            try:
-                admin_qs = User.objects.filter(role__in=["ADMIN", "SECURITY"])
-                if society_name:
-                    admin_qs = admin_qs.filter(resident_profile__society__name=society_name)
-                admin_emails = [u.email for u in admin_qs if u.email]
-            except Exception:
-                admin_emails = []
+            admin_qs = _get_society_admin_queryset(User, society_name)
+            admin_emails = [u.email for u in admin_qs if getattr(u, "email", None)]
 
             # SMS recipients: admins/security plus emergency contacts
             sms_numbers = []
             try:
-                if admin_qs is not None:
-                    sms_numbers.extend([u.phone for u in admin_qs if getattr(u, "phone", None)])
+                sms_numbers.extend(
+                    normalized
+                    for normalized in (
+                        _normalize_phone_number(u.phone)
+                        for u in admin_qs
+                        if getattr(u, "phone", None)
+                    )
+                    if normalized
+                )
             except Exception:
                 pass
 
@@ -129,19 +178,16 @@ class CreateSOSView(APIView):
                 profile = getattr(request.user, "resident_profile", None)
                 if profile:
                     for ec in getattr(profile, "emergency_contacts", []).all():
-                        if getattr(ec, "phone", None):
-                            sms_numbers.append(ec.phone)
+                        normalized_number = _normalize_phone_number(getattr(ec, "phone", None))
+                        if normalized_number:
+                            sms_numbers.append(normalized_number)
             except Exception:
                 pass
 
-            sms_numbers = [str(num).strip() for num in set(sms_numbers) if num and str(num).strip()]
+            sms_numbers = [num for num in set(sms_numbers) if num]
 
             device_tokens: List[str] = []
             try:
-                admin_qs = User.objects.filter(role__in=["ADMIN", "SECURITY"])
-                if society_name:
-                    admin_qs = admin_qs.filter(resident_profile__society__name=society_name)
-
                 profile_tokens = [u.device_token for u in admin_qs if getattr(u, "device_token", None)]
                 record_tokens = []
                 try:
@@ -153,31 +199,28 @@ class CreateSOSView(APIView):
             except Exception:
                 device_tokens = []
 
-            # Fire off notifications (best-effort)
+            # Fire off notifications (best-effort) via Celery. Failures should not break SOS creation.
             try:
-                if device_tokens:
-                    notif.send_push_notification(
-                        device_tokens,
-                        "Emergency SOS Alert",
-                        f"{resident_name} has triggered an SOS.",
+                recipient_ids = {request.user.id}
+                recipient_ids.update(admin_qs.values_list("id", flat=True))
+
+                notification_body = f"{resident_name} has triggered an SOS."
+                created_notification_ids = []
+                for recipient in User.objects.filter(id__in=list(recipient_ids)).only("id", "username"):
+                    notification = Notification.objects.create(
+                        user=recipient,
+                        title="Emergency SOS Alert",
+                        body=notification_body,
+                        kind="SOS",
                         data={
                             "type": "SOS",
                             "alert_id": str(sos.id),
                             "resident_id": str(request.user.id),
+                            "target": f"/alerts?alert_id={sos.id}",
                         },
                     )
-            except Exception:
-                logger = logging.getLogger(__name__)
-                logger.exception("Failed to send SOS push notifications")
+                    created_notification_ids.append(notification.id)
 
-            try:
-                if admin_emails:
-                    notif.send_email_notification(admin_emails, "SOS Alert: %s" % (sos.category or "SOS"), "notifications/sos_notification", context)
-            except Exception:
-                logger = logging.getLogger(__name__)
-                logger.exception("Failed to send SOS email notifications")
-
-            try:
                 if sms_numbers:
                     block_name = ""
                     flat_name = ""
@@ -205,10 +248,39 @@ class CreateSOSView(APIView):
                     if len(sms_message) > 320:
                         sms_message = sms_message[:317] + "..."
 
-                    notif.send_sms_notification(sms_numbers, sms_message)
+                    logger.info("QUEUE SMS")
+                    for notification_id in created_notification_ids:
+                        send_sms_notification_task.delay(sms_numbers, sms_message, notification_id=notification_id)
+
+                email_recipients = admin_emails or _get_fallback_email_recipients()
+                if email_recipients:
+                    logger.info("QUEUE EMAIL")
+                    for notification_id in created_notification_ids:
+                        send_email_notification_task.delay(
+                            email_recipients,
+                            "SOS Alert: %s" % (sos.category or "SOS"),
+                            "notifications/sos_notification",
+                            {**context, "notification_id": notification_id},
+                        )
+                else:
+                    logger.warning("No email recipients available for SOS alert; skipping admin email task")
+
+                if device_tokens:
+                    logger.info("QUEUE PUSH")
+                    for notification_id in created_notification_ids:
+                        send_push_notification_task.delay(
+                            device_tokens,
+                            "Emergency SOS Alert",
+                            f"{resident_name} has triggered an SOS.",
+                            data={
+                                "type": "SOS",
+                                "alert_id": str(sos.id),
+                                "resident_id": str(request.user.id),
+                                "notification_id": notification_id,
+                            },
+                        )
             except Exception:
-                logger = logging.getLogger(__name__)
-                logger.exception("Failed to send SOS SMS notifications")
+                logger.exception("Failed to queue SOS notifications")
 
             # Also send emails to emergency contacts if they have an email address.
             try:
@@ -225,23 +297,22 @@ class CreateSOSView(APIView):
 
                 if contact_emails:
                     try:
-                        notif.send_email_notification(
-                            contact_emails,
-                            "Emergency SOS Alert",
-                            "notifications/emergency_contact_notification",
-                            {**context, "contact_name": "Emergency Contact"},
-                        )
+                        logger.info("Queued Email notification task")
+                        for notification_id in created_notification_ids:
+                            send_email_notification_task.delay(
+                                contact_emails,
+                                "Emergency SOS Alert",
+                                "notifications/emergency_contact_notification",
+                                {**context, "contact_name": "Emergency Contact", "notification_id": notification_id},
+                            )
                     except Exception:
-                        logger = logging.getLogger(__name__)
-                        logger.exception("Failed to send SOS emails to emergency contacts")
+                        logger.exception("Failed to queue SOS emails to emergency contacts")
             except Exception:
                 # Ensure any email-related errors do not interrupt SOS creation
-                logger = logging.getLogger(__name__)
                 logger.exception("Unexpected error while sending emergency contact emails")
         except Exception:
             # Ensure notifications cannot break the primary flow
-            import logging as _logging
-            _logging.getLogger(__name__).exception("Unexpected error while triggering notifications")
+            logger.exception("Unexpected error while triggering notifications")
 
         return Response({
             "id": sos.id,
@@ -388,6 +459,7 @@ class AudioTranscriptionView(APIView):
 
         file_name = getattr(audio_file, "name", "") or "voice-note.m4a"
         return transcription_module.transcribe_audio(audio_bytes=audio_bytes, filename=file_name)
+
 
 
 class SOSAlertManagementView(APIView):

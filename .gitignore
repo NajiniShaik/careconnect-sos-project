@@ -34,3 +34,9 @@ copilot_notes.md
 
 firebase/
 *.json
+
+.expo/
+node_modules/
+android/
+ios/
+dist/

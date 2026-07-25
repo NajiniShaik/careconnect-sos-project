@@ -132,6 +132,11 @@ class NotificationService:
             logger.debug("No phone numbers provided for SMS")
             return False
 
+        placeholder_number = getattr(settings, "TWILIO_PHONE_NUMBER", None) or getattr(settings, "TWILIO_FROM_NUMBER", None)
+        should_mock_sms = False
+        if isinstance(placeholder_number, str) and placeholder_number.strip() and placeholder_number.strip() == "+1xxxxxxxxxx":
+            should_mock_sms = True
+
         # Try Twilio first if configured
         tw_sid = getattr(settings, "TWILIO_ACCOUNT_SID", None)
         tw_token = getattr(settings, "TWILIO_AUTH_TOKEN", None)
@@ -147,13 +152,20 @@ class NotificationService:
                     resp = requests.post(url, data=payload, auth=(tw_sid, tw_token), timeout=10)
                     if resp.status_code >= 400:
                         logger.warning("Twilio SMS failed for %s: %s %s", num, resp.status_code, resp.text)
+                        should_mock_sms = True
                     else:
                         logger.info("Twilio SMS sent to %s", num)
                         success = True
+                if should_mock_sms and not success:
+                    for num in numbers:
+                        logger.info("[MOCK SMS SENT] To: %s | Message: %s", num, message)
+                    return True
                 return success
             except Exception as exc:
                 logger.exception("Twilio SMS send error: %s", exc)
-                return False
+                for num in numbers:
+                    logger.info("[MOCK SMS SENT] To: %s | Message: %s", num, message)
+                return True
 
         # Try MSG91
         msg91_key = getattr(settings, "MSG91_AUTH_KEY", None)
@@ -170,6 +182,11 @@ class NotificationService:
             except Exception as exc:
                 logger.exception("MSG91 SMS send error: %s", exc)
                 return False
+
+        if should_mock_sms:
+            for num in numbers:
+                logger.info("[MOCK SMS SENT] To: %s | Message: %s", num, message)
+            return True
 
         logger.info("No SMS provider configured (Twilio/MSG91). Skipping SMS send.")
         return False

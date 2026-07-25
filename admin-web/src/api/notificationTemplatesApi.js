@@ -30,9 +30,26 @@ async function tryServerCall(fn) {
   }
 }
 
+function normalizeTemplatePayload(raw) {
+  if (Array.isArray(raw)) return raw;
+  if (raw?.results && Array.isArray(raw.results)) return raw.results;
+  if (raw?.templates && Array.isArray(raw.templates)) return raw.templates;
+  if (raw?.data && Array.isArray(raw.data)) return raw.data;
+  if (raw?.data?.results && Array.isArray(raw.data.results)) return raw.data.results;
+  if (raw?.data?.templates && Array.isArray(raw.data.templates)) return raw.data.templates;
+  return [];
+}
+
 export async function listTemplates() {
-  const server = await tryServerCall(() => axios.get(`${API}/templates/`, { headers: getAuthHeaders() }));
-  if (server.ok) return server.data;
+  const url = `${API}/templates/`;
+  console.log("[Templates] Fetching...", url);
+  const server = await tryServerCall(() => axios.get(url, { headers: getAuthHeaders() }));
+  console.log("[Templates] API Response:", server);
+  if (server.ok) {
+    const list = normalizeTemplatePayload(server.data);
+    console.log("[Templates] Loaded:", list.length, list);
+    return list;
+  }
 
   // fallback to localStorage
   const raw = localStorage.getItem(STORAGE_KEY);
@@ -57,7 +74,9 @@ export async function saveTemplate(template) {
   if (server.ok) return server.data;
 
   const list = await listTemplates();
-  const next = list.map((t) => (t.key === template.key ? { ...t, ...template } : t));
+  const next = list.some((t) => t.key === template.key)
+    ? list.map((t) => (t.key === template.key ? { ...t, ...template } : t))
+    : [...list, template];
   localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
   return template;
 }
@@ -67,12 +86,22 @@ export async function getTemplate(key) {
   return list.find((t) => t.key === key) || null;
 }
 
+export async function deleteTemplate(key) {
+  const server = await tryServerCall(() => axios.delete(`${API}/templates/${key}/`, { headers: getAuthHeaders() }));
+  if (server.ok) return server.data;
+
+  const list = await listTemplates();
+  const next = list.filter((t) => t.key !== key);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  return next;
+}
+
 export async function resetTemplates() {
   const defs = defaultTemplates();
   localStorage.setItem(STORAGE_KEY, JSON.stringify(defs));
   return defs;
 }
 
-const notificationTemplatesApi = { listTemplates, saveTemplate, getTemplate, resetTemplates };
+const notificationTemplatesApi = { listTemplates, saveTemplate, getTemplate, deleteTemplate, resetTemplates };
 
 export default notificationTemplatesApi;

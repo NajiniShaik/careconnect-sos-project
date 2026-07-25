@@ -10,7 +10,14 @@ const menuItems = [
   { name: "Residents", path: "/residents" },
   { name: "Emergency Contacts", path: "/emergency-contacts" },
   { name: "Alerts", path: "/alerts" },
-  ...(role === "ADMIN" ? [{ name: "Notification Templates", path: "/notification-templates" }] : []),
+  {
+    name: "Notifications",
+    path: "/notifications/logs",
+    children: [
+      { name: "Logs", path: "/notifications/logs" },
+      { name: "Templates", path: "/notifications/templates" },
+    ],
+  },
 ];
 
 export default function Sidebar() {
@@ -43,14 +50,17 @@ export default function Sidebar() {
 
       <nav style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
         {menuItems.map((item) => {
-          const active = location.pathname === item.path;
+          const active = location.pathname === item.path || (item.path === "/notifications/logs" && location.pathname === "/notifications");
+          const hasChildren = Array.isArray(item.children) && item.children.length > 0;
+
           return (
+            <div key={item.path}>
               <Link
-                key={item.path}
                 to={item.path}
                 style={{
                   display: "flex",
                   alignItems: "center",
+                  justifyContent: "space-between",
                   padding: "12px 14px",
                   borderRadius: "12px",
                   textDecoration: "none",
@@ -60,10 +70,37 @@ export default function Sidebar() {
                   boxShadow: active ? "inset 0 0 0 1px rgba(255,255,255,0.06)" : "none",
                 }}
               >
-                {item.name}
+                <span>{item.name}</span>
+                {hasChildren ? <span style={{ fontSize: 12, opacity: 0.8 }}>▾</span> : null}
               </Link>
-            );
-          })}
+
+              {hasChildren ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginTop: "6px", marginLeft: "12px" }}>
+                  {item.children.map((child) => {
+                    const childActive = location.pathname === child.path;
+                    return (
+                      <Link
+                        key={child.path}
+                        to={child.path}
+                        style={{
+                          display: "block",
+                          padding: "10px 14px",
+                          borderRadius: "12px",
+                          textDecoration: "none",
+                          color: childActive ? "#eff6ff" : "#cbd5e1",
+                          background: childActive ? "rgba(37, 99, 235, 0.14)" : "transparent",
+                          fontWeight: childActive ? 700 : 500,
+                        }}
+                      >
+                        {child.name}
+                      </Link>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
       </nav>
     </aside>
   );

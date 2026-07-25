@@ -1,16 +1,53 @@
-import React, { useEffect, useState, useCallback } from "react";
-import { View, Text, StyleSheet, FlatList, RefreshControl, Pressable } from "react-native";
-import { useRouter } from "expo-router";
-import { AppScreen, PageHeader, SectionCard, AppButton, appColors } from "../../components/common/designSystem";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
+import { View, Text, StyleSheet, FlatList, RefreshControl, Pressable, Modal, Alert, Platform } from "react-native";
+import { useRouter, useFocusEffect } from "expo-router";
+import { AppScreen, PageHeader, AppButton, appColors, AppIcon } from "../../components/common/designSystem";
 import notificationService from "../../services/notificationService";
+
+const FILTER_OPTIONS = [
+  { key: "all", label: "All" },
+  { key: "sos", label: "SOS Alerts" },
+  { key: "system", label: "System" },
+];
+
+const ICONS = {
+  sos: { name: "warning-outline", color: appColors.red },
+  system: { name: "shield-outline", color: appColors.amber },
+  general: { name: "sparkles-outline", color: appColors.blue },
+};
+
+function getNotificationType(item) {
+  const kind = String(item?.kind || item?.data?.type || "").toUpperCase();
+  const type = String(item?.data?.type || "").toUpperCase();
+  if (["SOS", "EMERGENCY"].includes(kind) || ["SOS", "EMERGENCY"].includes(type)) {
+    return "sos";
+  }
+  if (["ANNOUNCEMENT", "ANNOUNCEMENTS", "GENERAL", "INFO", "SOCIETY_UPDATE", "SOCIETY", "UPDATE"].includes(kind) || ["ANNOUNCEMENT", "GENERAL", "INFO", "SOCIETY_UPDATE", "SOCIETY", "UPDATE"].includes(type)) {
+    return "system";
+  }
+  return "general";
+}
+
+function formatRelativeTime(timestamp) {
+  if (!timestamp) return "Unknown";
+  const date = new Date(timestamp);
+  const delta = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (delta < 60) return `${delta} sec ago`;
+  if (delta < 3600) return `${Math.floor(delta / 60)} min ago`;
+  if (delta < 86400) return `${Math.floor(delta / 3600)} hr ago`;
+  return date.toLocaleDateString();
+}
 
 export default function NotificationsRoute() {
   const router = useRouter();
   const [items, setItems] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [activeFilter, setActiveFilter] = useState("all");
+  const [showPermissionModal, setShowPermissionModal] = useState(false);
+  const [permissionFlowStep, setPermissionFlowStep] = useState("request");
 
   const load = useCallback(async () => {
-    const list = await notificationService.loadLocalNotifications();
+    const list = await notificationService.fetchNotificationsFromBackend();
     setItems(Array.isArray(list) ? list : []);
   }, []);
 
@@ -18,12 +55,24 @@ export default function NotificationsRoute() {
     let mounted = true;
     (async () => {
       if (!mounted) return;
+      const status = await notificationService.getNotificationPermissionStatus();
+      setPermissionFlowStep("request");
+      if (status !== "granted" && status !== "denied" && status !== "expo_go") {
+        setShowPermissionModal(true);
+      }
       await load();
     })();
     return () => {
       mounted = false;
     };
   }, [load]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void load();
+      return undefined;
+    }, [load])
+  );
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -32,6 +81,11 @@ export default function NotificationsRoute() {
   };
 
   const unreadCount = items.filter((i) => !i.read).length;
+
+  const filteredItems = useMemo(() => {
+    if (activeFilter === "all") return items;
+    return items.filter((item) => getNotificationType(item) === activeFilter);
+  }, [items, activeFilter]);
 
   const handleMarkRead = async (id) => {
     const next = await notificationService.markNotificationRead(id);
@@ -43,90 +97,215 @@ export default function NotificationsRoute() {
     setItems(next);
   };
 
-  const renderItem = ({ item }) => (
+  const handleAllowNotifications = async () => {
+    const result = await notificationService.requestNotificationPermission();
+    if (result?.status === "granted") {
+      setPermissionFlowStep("success");
+      setShowPermissionModal(true);
+      try {
+        const deviceToken = await notificationService.getExpoPushTokenAsync();
+        const platform = "mobile";
+        const deviceId = await notificationService.getNotificationDeviceId();
+        if (deviceToken) {
+          await notificationService.registerDeviceWithBackend({ token: deviceToken, platform, device_id: deviceId });
+        }
+      } catch (err) {
+        // ignore registration failures, keep UX smooth
+      }
+    } else {
+      setShowPermissionModal(false);
+      setPermissionFlowStep("request");
+    }
+  };
+
+  const renderFilterPill = (option) => (
     <Pressable
-      onPress={() => {
-        if (item.data?.target) router.push(item.data.target);
-        handleMarkRead(item.id);
-      }}
-      style={[styles.card, !item.read && styles.unreadCard]}
+      key={option.key}
+      onPress={() => setActiveFilter(option.key)}
+      style={[
+        styles.filterPill,
+        activeFilter === option.key ? styles.filterPillActive : styles.filterPillInactive,
+      ]}
     >
-      <View style={styles.row}>
-        <View style={styles.icon} />
-        <View style={{ flex: 1 }}>
-          <Text style={styles.title}>{item.title}</Text>
-          <Text style={styles.message}>{item.body}</Text>
-          <View style={styles.metaRow}>
-            <Text style={styles.meta}>{new Date(item.received_at).toLocaleString()}</Text>
-            <Text style={styles.meta}>{item.data?.type || "General"}</Text>
-          </View>
-        </View>
-      </View>
+      <Text style={[styles.filterLabel, activeFilter === option.key ? styles.filterLabelActive : null]}>{option.label}</Text>
     </Pressable>
   );
 
-  const headerComponent = () => (
-    <View>
-      <PageHeader eyebrow="Notifications" title="Notification center" subtitle="Stay informed about alerts, announcements, and society updates." />
-      <View style={styles.buttonRow}>
-        <AppButton title={`Mark all read (${unreadCount})`} onPress={handleMarkAll} />
-        <AppButton title="Refresh" variant="secondary" onPress={onRefresh} />
+  const handleDelete = async (id) => {
+    const confirmed = await new Promise((resolve) => {
+      if (Platform.OS === "web" && typeof globalThis.window !== "undefined" && typeof window.confirm === "function") {
+        resolve(window.confirm("Delete this notification?"));
+        return;
+      }
+
+      Alert.alert("Delete notification", "Are you sure you want to delete this notification?", [
+        { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
+        { text: "Delete", style: "destructive", onPress: () => resolve(true) },
+      ]);
+    });
+
+    if (!confirmed) return;
+
+    const next = await notificationService.deleteNotification(id);
+    setItems(Array.isArray(next) ? next : []);
+  };
+
+  const renderNotificationCard = (item) => {
+    const type = getNotificationType(item);
+    const icon = ICONS[type] || ICONS.general;
+    const title = type === "sos" ? "Emergency SOS Alert" : "System Update";
+    const subtitle = item.body || "No description available.";
+
+    return (
+      <Pressable
+        key={item.id}
+        onPress={() => {
+          if (item.data?.target) router.push(item.data.target);
+          handleMarkRead(item.id);
+        }}
+        style={[styles.card, !item.read && styles.unreadCard]}
+      >
+        <View style={styles.cardHeaderRow}>
+          <View style={[styles.iconDot, { backgroundColor: icon.color }]}>
+            <AppIcon name={icon.name} size={18} color={appColors.white} />
+          </View>
+          <View style={styles.cardHeaderText}>
+            <Text style={styles.cardTitle}>{title}</Text>
+            <Text style={styles.cardType}>{item.data?.type || item.kind || "System"}</Text>
+          </View>
+          <Text style={styles.cardTime}>{formatRelativeTime(item.received_at || item.created_at)}</Text>
+        </View>
+        <Text style={styles.cardBody}>{subtitle}</Text>
+        <View style={styles.cardActions}>
+          <Pressable onPress={() => handleDelete(item.id)} style={styles.deleteButton}>
+            <AppIcon name="trash-outline" size={16} color={appColors.red} />
+            <Text style={styles.deleteButtonText}>Delete</Text>
+          </Pressable>
+        </View>
+      </Pressable>
+    );
+  };
+
+  const permissionModal = (
+    <Modal visible={showPermissionModal} animationType="fade" transparent>
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContainer}>
+          {permissionFlowStep === "request" ? (
+            <View style={styles.permissionCard}>
+              <View style={styles.permissionBadge}>
+                <AppIcon name="warning-outline" size={28} color={appColors.white} />
+              </View>
+              <Text style={styles.permissionHeading}>Stay Updated, Stay Safe</Text>
+              <Text style={styles.permissionSubheading}>Allow notifications to receive important emergency alerts.</Text>
+              <View style={styles.permissionList}>
+                {[
+                  "Instant Alerts",
+                  "Important Updates",
+                  "Stay Informed",
+                ].map((item) => (
+                  <View key={item} style={styles.permissionItem}>
+                    <View style={styles.permissionDot} />
+                    <Text style={styles.permissionItemText}>{item}</Text>
+                  </View>
+                ))}
+              </View>
+              <AppButton title="Allow Notifications" onPress={handleAllowNotifications} style={styles.primaryButton} />
+              <AppButton title="Not Now" variant="secondary" onPress={() => {
+                setShowPermissionModal(false);
+                setPermissionFlowStep("request");
+              }} style={styles.secondaryButton} />
+            </View>
+          ) : (
+            <View style={[styles.permissionCard, styles.permissionSuccessCard]}>
+              <View style={[styles.permissionBadge, styles.permissionBadgeSuccess]}>
+                <AppIcon name="shield-checkmark-outline" size={28} color={appColors.white} />
+              </View>
+              <Text style={styles.permissionHeading}>You&apos;re All Set!</Text>
+              <Text style={styles.permissionSubheading}>You will now receive important alerts.</Text>
+              <AppButton title="Continue" onPress={() => setShowPermissionModal(false)} style={styles.primaryButton} />
+            </View>
+          )}
+        </View>
       </View>
-      <SectionCard title="Emergency notifications" subtitle="Your recent emergency messages." style={styles.cardSpacing}>
-        <View style={styles.notificationRow}>
-          <Text style={styles.notificationTitle}>No new emergency notifications</Text>
-          <Text style={styles.notificationText}>You will see alerts here when the system sends them.</Text>
-        </View>
-      </SectionCard>
-      <SectionCard title="Announcements" subtitle="Community notices and updates." style={styles.cardSpacing}>
-        <View style={styles.notificationRow}>
-          <Text style={styles.notificationTitle}>No announcements yet</Text>
-          <Text style={styles.notificationText}>All community announcements will appear here.</Text>
-        </View>
-      </SectionCard>
-      <SectionCard title="Society updates" subtitle="Important updates from your society." style={styles.cardSpacing}>
-        <View style={styles.notificationRow}>
-          <Text style={styles.notificationTitle}>No updates available</Text>
-          <Text style={styles.notificationText}>Latest society updates show up in this feed.</Text>
-        </View>
-      </SectionCard>
-    </View>
+    </Modal>
   );
 
   return (
-    <AppScreen scrollable={false}>
-      <FlatList
-        data={items}
-        keyExtractor={(i) => i.id}
-        renderItem={renderItem}
-        contentContainerStyle={styles.listContent}
-        ListHeaderComponent={headerComponent}
-        ListEmptyComponent={() => (
-          <View style={styles.emptyWrapper}>
-            <Text style={styles.emptyText}>No notifications yet</Text>
-          </View>
-        )}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={appColors.blue} />}
+    <AppScreen>
+      <PageHeader
+        eyebrow="Notifications"
+        title="Notification center"
+        subtitle="Stay informed about alerts, announcements, and society updates."
       />
+
+      <View style={styles.filterRow}>{FILTER_OPTIONS.map(renderFilterPill)}</View>
+
+      <View style={styles.topBar}>
+        <Text style={styles.summaryText}>{unreadCount} unread</Text>
+        <View style={styles.topButtons}>
+          <AppButton title="Mark all read" onPress={handleMarkAll} variant="secondary" />
+          <AppButton title="Refresh" onPress={onRefresh} variant="ghost" />
+        </View>
+      </View>
+
+      {filteredItems.length === 0 ? (
+        <View style={styles.emptyState}>
+          <Text style={styles.emptyTitle}>No notifications yet</Text>
+          <Text style={styles.emptyMessage}>Your notification feed is empty right now. Pull to refresh.</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={filteredItems}
+          keyExtractor={(item) => String(item.id || item.received_at || Math.random())}
+          renderItem={({ item }) => renderNotificationCard(item)}
+          contentContainerStyle={styles.listContent}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={appColors.blue} />}
+          showsVerticalScrollIndicator={false}
+        />
+      )}
+
+      {permissionModal}
     </AppScreen>
   );
 }
 
 const styles = StyleSheet.create({
   listContent: { paddingBottom: 32 },
-  buttonRow: { flexDirection: "row", justifyContent: "space-between", gap: 8, marginBottom: 14 },
-  cardSpacing: { marginBottom: 14 },
-  notificationRow: { paddingVertical: 12 },
-  notificationTitle: { fontSize: 16, fontWeight: "700", color: appColors.navy, marginBottom: 6 },
-  notificationText: { color: appColors.slate, lineHeight: 20 },
-  card: { padding: 12, borderRadius: 10, backgroundColor: "#fff", marginBottom: 10 },
-  unreadCard: { backgroundColor: "#eef2ff" },
-  row: { flexDirection: "row", gap: 12 },
-  icon: { width: 44, height: 44, borderRadius: 10, backgroundColor: appColors.blue },
-  title: { fontSize: 15, fontWeight: "700", color: appColors.navy },
-  message: { color: appColors.slate, marginTop: 6 },
-  metaRow: { flexDirection: "row", justifyContent: "space-between", marginTop: 8 },
-  meta: { color: appColors.slate, fontSize: 12 },
-  emptyWrapper: { padding: 24, alignItems: "center" },
-  emptyText: { color: appColors.slate },
+  filterRow: { flexDirection: "row", gap: 10, marginBottom: 16, flexWrap: "wrap" },
+  filterPill: { borderRadius: 999, paddingVertical: 10, paddingHorizontal: 16, borderWidth: 1 },
+  filterPillActive: { borderColor: appColors.blue, backgroundColor: appColors.blueSoft },
+  filterPillInactive: { borderColor: appColors.border, backgroundColor: appColors.white },
+  filterLabel: { fontSize: 13, fontWeight: "600", color: appColors.slate },
+  filterLabelActive: { color: appColors.blue },
+  topBar: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 12 },
+  summaryText: { color: appColors.slate, fontSize: 14, fontWeight: "600" },
+  topButtons: { flexDirection: "row", gap: 10 },
+  card: { borderRadius: 18, backgroundColor: appColors.white, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: appColors.border },
+  unreadCard: { backgroundColor: appColors.blueSoft },
+  cardHeaderRow: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 12 },
+  iconDot: { width: 40, height: 40, borderRadius: 12, justifyContent: "center", alignItems: "center" },
+  cardHeaderText: { flex: 1 },
+  cardTitle: { fontSize: 16, fontWeight: "800", color: appColors.navy },
+  cardType: { marginTop: 4, fontSize: 13, color: appColors.muted },
+  cardTime: { fontSize: 12, color: appColors.muted },
+  cardBody: { fontSize: 14, lineHeight: 20, color: appColors.slate },
+  cardActions: { marginTop: 12, alignItems: "flex-end" },
+  deleteButton: { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 8, paddingHorizontal: 10, borderRadius: 999, borderWidth: 1, borderColor: appColors.redSoft || appColors.red, backgroundColor: appColors.redSoft || appColors.white },
+  deleteButtonText: { color: appColors.red, fontSize: 13, fontWeight: "700" },
+  emptyState: { marginTop: 48, padding: 24, borderRadius: 18, backgroundColor: appColors.white, borderWidth: 1, borderColor: appColors.border, alignItems: "center" },
+  emptyTitle: { fontSize: 17, fontWeight: "800", color: appColors.navy, marginBottom: 8 },
+  emptyMessage: { fontSize: 14, color: appColors.slate, textAlign: "center" },
+  modalOverlay: { flex: 1, backgroundColor: "rgba(15, 23, 42, 0.35)", justifyContent: "center", alignItems: "center", padding: 20 },
+  modalContainer: { width: "100%", maxWidth: 520, gap: 16 },
+  permissionCard: { backgroundColor: appColors.white, borderRadius: 22, padding: 24, borderWidth: 1, borderColor: appColors.border, shadowColor: appColors.shadow, shadowOpacity: 0.16, shadowRadius: 30, shadowOffset: { width: 0, height: 12 }, elevation: 8 },
+  permissionBadge: { width: 56, height: 56, borderRadius: 18, justifyContent: "center", alignItems: "center", backgroundColor: appColors.blue, marginBottom: 18 },
+  permissionBadgeSuccess: { backgroundColor: appColors.green },
+  permissionHeading: { fontSize: 22, fontWeight: "800", color: appColors.navy, marginBottom: 10 },
+  permissionSubheading: { color: appColors.slate, fontSize: 15, lineHeight: 22, marginBottom: 18 },
+  permissionList: { gap: 12, marginBottom: 20 },
+  permissionItem: { flexDirection: "row", alignItems: "center", gap: 10 },
+  permissionDot: { width: 10, height: 10, borderRadius: 99, backgroundColor: appColors.blue },
+  permissionItemText: { color: appColors.navy, fontSize: 14, fontWeight: "600" },
+  primaryButton: { marginBottom: 10 },
+  secondaryButton: {},
 });

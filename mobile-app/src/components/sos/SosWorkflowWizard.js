@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Image, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { deleteAsync } from "expo-file-system/legacy";
 import * as Location from "expo-location";
 import { useRouter } from "expo-router";
@@ -177,6 +177,7 @@ export default function SosWorkflowWizard({ user, onClose }) {
   const [explicitRecordingUri, setExplicitRecordingUri] = useState("");
   const [recordingDeleted, setRecordingDeleted] = useState(false);
   const [selectedLocationState, setSelectedLocationState] = useState(() => createMapLocationState(null));
+  const currentStepRef = useRef(currentStep);
   const webStreamRef = useRef(null);
   const [isWebRecording, setIsWebRecording] = useState(false);
 
@@ -429,7 +430,7 @@ export default function SosWorkflowWizard({ user, onClose }) {
           loading: false,
           error: geocoded.geocodingError || "",
         });
-        if (forceRefresh || currentStep === 1) {
+        if (forceRefresh || currentStepRef.current === 1) {
           setCurrentStep(2);
         }
         return;
@@ -452,6 +453,10 @@ export default function SosWorkflowWizard({ user, onClose }) {
         error: "Unable to capture your location right now.",
       });
     }
+  }, []);
+
+  useEffect(() => {
+    currentStepRef.current = currentStep;
   }, [currentStep]);
 
   useEffect(() => {

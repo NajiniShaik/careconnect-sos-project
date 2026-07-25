@@ -1,4 +1,5 @@
 import { api, getStoredToken, getAuthHeaders } from './authService.js';
+import { Platform } from 'react-native';
 
 let Location = null;
 
@@ -336,11 +337,19 @@ export async function uploadSosAudio(id, audioUri, fileName = "voice-note.m4a") 
 
   const formData = new FormData();
   formData.append("message", "Voice note attached");
-  formData.append("audio", {
-    uri: audioUri,
-    name: fileName,
-    type: "audio/m4a",
-  });
+
+  if (Platform.OS === 'web') {
+    const response = await fetch(audioUri);
+    const blob = await response.blob();
+    const file = new File([blob], fileName, { type: blob.type || 'audio/webm' });
+    formData.append("audio", file);
+  } else {
+    formData.append("audio", {
+      uri: audioUri,
+      name: fileName,
+      type: "audio/m4a",
+    });
+  }
 
   console.log(`[sos] POST ${requestUrl} (audio upload)`);
 
@@ -367,11 +376,19 @@ export async function transcribeSosAudio(audioUri, fileName = "voice-note.m4a") 
   }
 
   const formData = new FormData();
-  formData.append("audio", {
-    uri: audioUri,
-    name: fileName,
-    type: "audio/m4a",
-  });
+
+  if (Platform.OS === 'web') {
+    const response = await fetch(audioUri);
+    const blob = await response.blob();
+    const file = new File([blob], fileName, { type: blob.type || 'audio/webm' });
+    formData.append("audio", file);
+  } else {
+    formData.append("audio", {
+      uri: audioUri,
+      name: fileName,
+      type: "audio/m4a",
+    });
+  }
 
   console.log(`[sos] POST ${requestUrl} (audio transcription)`);
 
