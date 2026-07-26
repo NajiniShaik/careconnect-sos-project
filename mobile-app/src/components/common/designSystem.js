@@ -55,7 +55,7 @@ export function AppIcon({ name, size = 18, color = appColors.blue }) {
   return <Text style={{ fontSize: size, color, lineHeight: size }}>{glyph}</Text>;
 }
 
-export function AppScreen({ children, contentStyle, scrollable = true, background = "default" }) {
+export function AppScreen({ children, contentStyle = undefined, scrollable = true, background = "default" }) {
   const containerStyle = background === "brand" ? styles.brandScreen : styles.screen;
 
   return (
@@ -76,7 +76,7 @@ export function AppScreen({ children, contentStyle, scrollable = true, backgroun
   );
 }
 
-export function PageHeader({ title, subtitle, eyebrow, action }) {
+export function PageHeader({ title, subtitle, eyebrow, action = undefined }) {
   return (
     <View style={styles.headerRow}>
       <View style={styles.headerTextWrap}>
@@ -113,7 +113,7 @@ export function SectionCard({ children, title, subtitle, icon, action, style }) 
   );
 }
 
-export function AppButton({ title, onPress, variant = "primary", disabled = false, loading = false, style, textStyle, icon }) {
+export function AppButton({ title, onPress, variant = "primary", disabled = false, loading = false, style, textStyle = undefined, icon = undefined }) {
   const isSecondary = variant === "secondary";
   const isGhost = variant === "ghost";
   const isDanger = variant === "danger";

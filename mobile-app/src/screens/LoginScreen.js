@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Alert, StyleSheet, View } from "react-native";
 import { useRouter } from "expo-router";
 import { api, getErrorMessage, persistAuth } from "../services/authService";
+import notificationService from "../services/notificationService";
 import { getPostLoginRoute } from "../services/navigationService";
 import {
   AppButton,

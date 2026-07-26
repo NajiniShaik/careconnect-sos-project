@@ -191,6 +191,10 @@ async function tryRefreshToken() {
   return false;
 }
 
+export async function waitForAuthReady() {
+  return getStoredToken();
+}
+
 export async function getAuthHeaders(token = null) {
   const resolvedToken = token ?? (await getStoredToken());
   return resolvedToken ? { Authorization: `Bearer ${resolvedToken}` } : {};

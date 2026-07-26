@@ -7,6 +7,7 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 from rest_framework import status
 
+from notifications.models import Notification
 from .models import SOS, SOSMessage
 from .serializers import SOSSerializer
 
@@ -77,6 +78,93 @@ class SOSCategoryFlowTests(TestCase):
         self.assertEqual(response.data["priority"], "HIGH")
         saved_sos = SOS.objects.get(user=self.user)
         self.assertEqual(saved_sos.priority, "HIGH")
+
+    @patch("sos.views.send_sms_notification_task.delay")
+    @patch("sos.views.send_email_notification_task.delay")
+    @patch("sos.views.send_push_notification_task.delay")
+    def test_sos_push_notifications_are_targeted_per_recipient(self, mock_push_delay, mock_email_delay, mock_sms_delay):
+        self.client.force_authenticate(user=self.user)
+        self.user.device_token = "resident-token"
+        self.user.save(update_fields=["device_token"])
+
+        admin_user = self.user_model.objects.create_user(
+            username="admin_push",
+            email="admin_push@example.com",
+            password="testpass123",
+            role="ADMIN",
+        )
+        admin_user.device_token = "admin-token"
+        admin_user.save(update_fields=["device_token"])
+
+        response = self.client.post(
+            "/api/sos/trigger/",
+            {
+                "message": "Need urgent help",
+                "location": "Block 3",
+                "category": "medical",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(any(call.args[0] == ["resident-token"] for call in mock_push_delay.call_args_list))
+        self.assertTrue(any(call.args[0] == ["admin-token"] for call in mock_push_delay.call_args_list))
+
+    @patch("sos.views.send_sms_notification_task.delay")
+    @patch("sos.views.send_email_notification_task.delay")
+    @patch("sos.views.send_push_notification_task.delay")
+    def test_sos_routes_to_guardian_security_and_volunteer_recipients_only(self, mock_push_delay, mock_email_delay, mock_sms_delay):
+        self.client.force_authenticate(user=self.user)
+
+        guardian_user = self.user_model.objects.create_user(
+            username="guardian_route",
+            email="guardian_route@example.com",
+            password="testpass123",
+            role="GUARDIAN",
+        )
+        volunteer_user = self.user_model.objects.create_user(
+            username="volunteer_route",
+            email="volunteer_route@example.com",
+            password="testpass123",
+            role="VOLUNTEER",
+        )
+
+        response = self.client.post(
+            "/api/sos/trigger/",
+            {
+                "message": "Need urgent help",
+                "location": "Block 3",
+                "category": "medical",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(Notification.objects.filter(kind="SOS", user=self.user).count(), 1)
+        self.assertEqual(Notification.objects.filter(kind="SOS", user=guardian_user).count(), 1)
+        self.assertEqual(Notification.objects.filter(kind="SOS", user=self.security_user).count(), 1)
+        self.assertEqual(Notification.objects.filter(kind="SOS", user=volunteer_user).count(), 1)
+        self.assertEqual(Notification.objects.filter(kind="SOS", user=self.admin_user).count(), 1)
+        self.assertEqual(Notification.objects.filter(kind="SOS").count(), 5)
+
+    def test_sos_routing_deduplicates_overlapping_role_recipients(self):
+        self.client.force_authenticate(user=self.user)
+        self.security_user.device_token = "security-token"
+        self.security_user.save(update_fields=["device_token"])
+
+        response = self.client.post(
+            "/api/sos/trigger/",
+            {
+                "message": "Need urgent help",
+                "location": "Block 3",
+                "category": "medical",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(Notification.objects.filter(kind="SOS", user=self.security_user).count(), 1)
+        self.assertEqual(Notification.objects.filter(kind="SOS", user=self.admin_user).count(), 1)
 
     def test_sos_creation_accepts_location_coordinates(self):
         self.client.force_authenticate(user=self.user)

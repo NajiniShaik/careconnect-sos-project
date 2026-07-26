@@ -7,6 +7,7 @@ from rest_framework import status
 
 from .models import DeviceToken, Notification, NotificationDelivery
 from .tasks import send_email_notification_task, send_push_notification_task
+from .firebase import send_push_notification
 
 
 class NotificationDeviceRegistrationTests(TestCase):
@@ -63,6 +64,62 @@ class NotificationDeviceRegistrationTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(DeviceToken.objects.filter(user=self.user, token="android-token-123").exists())
 
+    def test_register_device_token_reassigns_existing_token_to_current_user(self):
+        other_user = self.user_model.objects.create_user(
+            username="admin_token",
+            email="admin_token@example.com",
+            password="testpass123",
+            role="ADMIN",
+        )
+        other_user.device_token = "shared-token-123"
+        other_user.save(update_fields=["device_token"])
+        DeviceToken.objects.create(user=other_user, token="shared-token-123", platform="android", device_id="device-1")
+
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(
+            "/api/notifications/register-device/",
+            {"device_token": "shared-token-123"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.user.refresh_from_db()
+        other_user.refresh_from_db()
+        self.assertEqual(self.user.device_token, "shared-token-123")
+        self.assertEqual(other_user.device_token, "")
+        self.assertTrue(DeviceToken.objects.filter(user=self.user, token="shared-token-123").exists())
+        self.assertFalse(DeviceToken.objects.filter(user=other_user, token="shared-token-123").exists())
+
+    def test_register_device_reuses_existing_registration_for_same_device(self):
+        DeviceToken.objects.create(user=self.user, token="old-token", platform="android", device_id="device-1")
+
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(
+            "/api/notifications/register-device/",
+            {"device_token": "new-token", "device_id": "device-1", "platform": "android"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(DeviceToken.objects.filter(user=self.user, device_id="device-1").count(), 1)
+        self.assertEqual(DeviceToken.objects.get(user=self.user, device_id="device-1").token, "new-token")
+
+    @patch("notifications.firebase.initialize_firebase")
+    @patch("firebase_admin.messaging.send")
+    def test_send_push_notification_removes_invalid_registration_token(self, mock_send, mock_initialize):
+        DeviceToken.objects.create(user=self.user, token="invalid-token", platform="android", device_id="device-1")
+        self.user.device_token = "invalid-token"
+        self.user.save(update_fields=["device_token"])
+
+        mock_send.side_effect = Exception("messaging/registration-token-not-registered")
+
+        result = send_push_notification("invalid-token", "title", "body", {"id": 1})
+
+        self.assertIsNone(result)
+        self.assertFalse(DeviceToken.objects.filter(token="invalid-token").exists())
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.device_token, "")
+
 
 class NotificationListAndReadTests(TestCase):
     def setUp(self):
@@ -85,6 +142,17 @@ class NotificationListAndReadTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data), 2)
         self.assertEqual(response.data[0]["title"], "Welcome")
+
+    def test_list_notifications_supports_unread_filter(self):
+        Notification.objects.create(user=self.user, title="SOS alert", body="Emergency", kind="SOS", read=False)
+        Notification.objects.create(user=self.user, title="Welcome", body="Hello", kind="ANNOUNCEMENT", read=True)
+
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get("/api/notifications/notifications/", {"unread_only": "1"})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["title"], "SOS alert")
 
     def test_mark_all_notifications_read(self):
         Notification.objects.create(user=self.user, title="SOS alert", body="Emergency", kind="SOS", read=False)

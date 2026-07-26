@@ -75,6 +75,7 @@ def _update_delivery_status(notification_id, channel, recipient_address, status,
 def send_push_notification_task(device_tokens, title, body, data=None):
     """Asynchronously send a push notification using the existing service."""
     logger.info("Starting Celery push notification task for %s recipients", len(device_tokens or []))
+    logger.info("[FCM] Celery push payload title=%s body=%s data=%s", title, body, data or {})
     notification_id = None
     try:
         payload = data or {}
@@ -100,7 +101,7 @@ def send_push_notification_task(device_tokens, title, body, data=None):
                     recipient_role=recipient_role,
                     recipient_address_value=str(recipient),
                 )
-        logger.info("Finished Celery push notification task")
+        logger.info("Finished Celery push notification task result=%s", result)
         return result
     except Exception:
         logger.exception("Celery push notification task failed")

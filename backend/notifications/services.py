@@ -22,6 +22,29 @@ from notifications.firebase import send_push_notification as send_fcm_push_notif
 logger = logging.getLogger(__name__)
 
 
+def _mask_token(token):
+    token_text = str(token or "")
+    if not token_text:
+        return ""
+    if len(token_text) <= 8:
+        return token_text
+    return f"{token_text[:8]}...{token_text[-4:]}"
+
+
+def _normalize_device_tokens(device_tokens):
+    seen = set()
+    normalized = []
+    for token in device_tokens or []:
+        if token is None:
+            continue
+        token_value = str(token).strip()
+        if not token_value or token_value in seen:
+            continue
+        seen.add(token_value)
+        normalized.append(token_value)
+    return normalized
+
+
 class NotificationService:
     """High-level notification service.
 
@@ -39,13 +62,13 @@ class NotificationService:
         False if FCM is not configured.
         """
         try:
-            tokens = [t for t in (device_tokens or []) if t]
+            tokens = _normalize_device_tokens(device_tokens)
             if not tokens:
                 # Auto-load tokens from the notifications device token table
                 try:
                     DeviceToken = apps.get_model("notifications", "DeviceToken")
                     db_tokens = DeviceToken.objects.filter().values_list("token", flat=True)
-                    tokens = [t for t in db_tokens if t]
+                    tokens = _normalize_device_tokens(db_tokens)
                 except (LookupError, OperationalError) as exc:
                     logger.debug("No device tokens found in DB (or DB unavailable): %s", exc)
 
@@ -54,7 +77,7 @@ class NotificationService:
                 try:
                     user_model = get_user_model()
                     user_tokens = user_model.objects.filter(device_token__isnull=False).exclude(device_token__exact="").values_list("device_token", flat=True)
-                    tokens = [t for t in user_tokens if t]
+                    tokens = _normalize_device_tokens(user_tokens)
                 except Exception as exc:
                     logger.debug("Failed to load device tokens from user profiles: %s", exc)
 
@@ -62,11 +85,17 @@ class NotificationService:
                 logger.debug("No device tokens provided for push notification")
                 return False
 
+            logger.info("[FCM] Sending push notification to %s token(s) title=%s body=%s", len(tokens), title, body)
             success = False
             for token in tokens:
-                response = send_fcm_push_notification(token, title, body, data=data)
-                if response is not None:
-                    success = True
+                logger.info("[FCM] Device token found for push recipient: %s", _mask_token(token))
+                try:
+                    response = send_fcm_push_notification(token, title, body, data=data)
+                    logger.info("[FCM] Firebase response for token=%s response=%s", _mask_token(token), response)
+                    if response is not None:
+                        success = True
+                except Exception as exc:
+                    logger.exception("[FCM] Firebase send failed for token=%s error=%s", _mask_token(token), exc)
 
             if not success:
                 logger.info("FCM send attempted but no messages were delivered")
@@ -145,27 +174,24 @@ class NotificationService:
             try:
                 import requests
 
-                success = False
+                success = True
                 for num in numbers:
                     url = f"https://api.twilio.com/2010-04-01/Accounts/{tw_sid}/Messages.json"
                     payload = {"To": num, "From": tw_from, "Body": message}
                     resp = requests.post(url, data=payload, auth=(tw_sid, tw_token), timeout=10)
                     if resp.status_code >= 400:
                         logger.warning("Twilio SMS failed for %s: %s %s", num, resp.status_code, resp.text)
-                        should_mock_sms = True
-                    else:
-                        logger.info("Twilio SMS sent to %s", num)
-                        success = True
-                if should_mock_sms and not success:
-                    for num in numbers:
-                        logger.info("[MOCK SMS SENT] To: %s | Message: %s", num, message)
-                    return True
-                return success
+                        success = False
+                        break
+
+                    logger.info("Twilio SMS sent to %s", num)
+
+                if not success:
+                    return False
+                return True
             except Exception as exc:
                 logger.exception("Twilio SMS send error: %s", exc)
-                for num in numbers:
-                    logger.info("[MOCK SMS SENT] To: %s | Message: %s", num, message)
-                return True
+                return False
 
         # Try MSG91
         msg91_key = getattr(settings, "MSG91_AUTH_KEY", None)

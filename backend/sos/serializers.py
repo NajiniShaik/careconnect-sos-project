@@ -192,7 +192,7 @@ class SpeechToTextSerializer(serializers.Serializer):
 
     def validate_audio(self, value):
         if value.size == 0:
-            raise serializers.ValidationError("Uploaded audio file is empty.")
+            raise serializers.ValidationError("The submitted file is empty.")
 
         allowed_extensions = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac", ".aiff", ".aif"}
         extension = value.name and value.name.lower().rsplit(".", 1)[-1]

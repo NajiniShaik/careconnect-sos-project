@@ -70,6 +70,70 @@ def _get_fallback_email_recipients():
     return [recipient] if recipient else []
 
 
+def _get_user_device_tokens(user):
+    if not user:
+        return []
+
+    tokens = []
+    if getattr(user, "device_token", None):
+        user_token = str(user.device_token).strip()
+        if user_token:
+            tokens.append(user_token)
+
+    try:
+        record_tokens = list(DeviceToken.objects.filter(user=user).values_list("token", flat=True))
+    except Exception:
+        record_tokens = []
+
+    for token in record_tokens or []:
+        token_value = str(token).strip() if token is not None else ""
+        if token_value and token_value not in tokens:
+            tokens.append(token_value)
+
+    return tokens
+
+
+def _get_sos_recipients(resident_user, society_name):
+    recipients = [resident_user]
+    User = get_user_model()
+
+    try:
+        guardians = list(User.objects.filter(role="GUARDIAN"))
+        recipients.extend([guardian for guardian in guardians if guardian and guardian.id != getattr(resident_user, "id", None)])
+    except Exception:
+        guardians = []
+
+    try:
+        security_users = list(User.objects.filter(role="SECURITY"))
+        recipients.extend([security_user for security_user in security_users if security_user and security_user.id != getattr(resident_user, "id", None)])
+    except Exception:
+        security_users = []
+
+    try:
+        volunteer_users = list(User.objects.filter(role="VOLUNTEER"))
+        recipients.extend([volunteer_user for volunteer_user in volunteer_users if volunteer_user and volunteer_user.id != getattr(resident_user, "id", None)])
+    except Exception:
+        volunteer_users = []
+
+    try:
+        admin_qs = _get_society_admin_queryset(User, society_name)
+        recipients.extend([admin_user for admin_user in admin_qs if admin_user and admin_user.id != getattr(resident_user, "id", None)])
+    except Exception:
+        admin_qs = []
+
+    unique_recipients = []
+    seen_ids = set()
+    for recipient in recipients:
+        if not recipient:
+            continue
+        recipient_id = getattr(recipient, "id", None)
+        if recipient_id in seen_ids:
+            continue
+        seen_ids.add(recipient_id)
+        unique_recipients.append(recipient)
+    return unique_recipients
+
+
 class SOSCategoriesView(APIView):
     permission_classes = [AllowAny]
 
@@ -186,27 +250,21 @@ class CreateSOSView(APIView):
 
             sms_numbers = [num for num in set(sms_numbers) if num]
 
-            device_tokens: List[str] = []
-            try:
-                profile_tokens = [u.device_token for u in admin_qs if getattr(u, "device_token", None)]
-                record_tokens = []
-                try:
-                    record_tokens = list(DeviceToken.objects.filter(user__in=admin_qs).values_list("token", flat=True))
-                except Exception:
-                    record_tokens = []
-
-                device_tokens = [t for t in set(profile_tokens + [t for t in record_tokens if t]) if t]
-            except Exception:
-                device_tokens = []
-
             # Fire off notifications (best-effort) via Celery. Failures should not break SOS creation.
             try:
-                recipient_ids = {request.user.id}
-                recipient_ids.update(admin_qs.values_list("id", flat=True))
-
+                recipient_users = _get_sos_recipients(request.user, society_name)
+                recipients_to_notify = []
+                seen_recipient_ids = set()
+                for recipient in recipient_users:
+                    recipient_id = getattr(recipient, "id", None)
+                    if recipient_id is None or recipient_id in seen_recipient_ids:
+                        continue
+                    seen_recipient_ids.add(recipient_id)
+                    recipients_to_notify.append(recipient)
+                logger.info("[SOS] routing recipients=%s resident=%s society=%s", [getattr(user, "username", "") for user in recipients_to_notify], getattr(request.user, "username", ""), society_name)
                 notification_body = f"{resident_name} has triggered an SOS."
-                created_notification_ids = []
-                for recipient in User.objects.filter(id__in=list(recipient_ids)).only("id", "username"):
+                created_notifications = []
+                for recipient in recipients_to_notify:
                     notification = Notification.objects.create(
                         user=recipient,
                         title="Emergency SOS Alert",
@@ -219,9 +277,12 @@ class CreateSOSView(APIView):
                             "target": f"/alerts?alert_id={sos.id}",
                         },
                     )
-                    created_notification_ids.append(notification.id)
+                    created_notifications.append((recipient, notification))
+
+                primary_notification_id = created_notifications[0][1].id if created_notifications else None
 
                 if sms_numbers:
+                    logger.info("[SOS] channels=SMS recipients=%s", sms_numbers)
                     block_name = ""
                     flat_name = ""
                     try:
@@ -249,36 +310,49 @@ class CreateSOSView(APIView):
                         sms_message = sms_message[:317] + "..."
 
                     logger.info("QUEUE SMS")
-                    for notification_id in created_notification_ids:
-                        send_sms_notification_task.delay(sms_numbers, sms_message, notification_id=notification_id)
+                    send_sms_notification_task.delay(sms_numbers, sms_message, notification_id=primary_notification_id)
 
                 email_recipients = admin_emails or _get_fallback_email_recipients()
                 if email_recipients:
+                    logger.info("[SOS] channels=Email recipients=%s", email_recipients)
                     logger.info("QUEUE EMAIL")
-                    for notification_id in created_notification_ids:
-                        send_email_notification_task.delay(
-                            email_recipients,
-                            "SOS Alert: %s" % (sos.category or "SOS"),
-                            "notifications/sos_notification",
-                            {**context, "notification_id": notification_id},
-                        )
+                    send_email_notification_task.delay(
+                        email_recipients,
+                        "SOS Alert: %s" % (sos.category or "SOS"),
+                        "notifications/sos_notification",
+                        {**context, "notification_id": primary_notification_id},
+                    )
                 else:
                     logger.warning("No email recipients available for SOS alert; skipping admin email task")
 
-                if device_tokens:
-                    logger.info("QUEUE PUSH")
-                    for notification_id in created_notification_ids:
-                        send_push_notification_task.delay(
-                            device_tokens,
-                            "Emergency SOS Alert",
-                            f"{resident_name} has triggered an SOS.",
-                            data={
-                                "type": "SOS",
-                                "alert_id": str(sos.id),
-                                "resident_id": str(request.user.id),
-                                "notification_id": notification_id,
-                            },
-                        )
+                for recipient, notification in created_notifications:
+                    device_tokens = _get_user_device_tokens(recipient)
+                    if not device_tokens:
+                        logger.info("[SOS] No device tokens available for recipient=%s role=%s", getattr(recipient, "username", ""), getattr(recipient, "role", ""))
+                        continue
+
+                    logger.info("[SOS] channels=Push recipient=%s role=%s token_count=%s", getattr(recipient, "username", ""), getattr(recipient, "role", ""), len(device_tokens))
+                    push_data = {
+                        "type": "SOS",
+                        "alert_id": str(sos.id),
+                        "resident_id": str(request.user.id),
+                        "notification_id": notification.id,
+                    }
+                    logger.info(
+                        "[SOS DEBUG] queue_push recipient=%s role=%s tokens=%s title=%s body=%s data=%s",
+                        getattr(recipient, "username", ""),
+                        getattr(recipient, "role", ""),
+                        device_tokens,
+                        "Emergency SOS Alert",
+                        f"{resident_name} has triggered an SOS.",
+                        push_data,
+                    )
+                    send_push_notification_task.delay(
+                        device_tokens,
+                        "Emergency SOS Alert",
+                        f"{resident_name} has triggered an SOS.",
+                        data=push_data,
+                    )
             except Exception:
                 logger.exception("Failed to queue SOS notifications")
 

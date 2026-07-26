@@ -1,18 +1,31 @@
-import { Tabs, useFocusEffect, useRouter } from "expo-router";
+import { Tabs, useRouter } from "expo-router";
 import React, { useCallback, useEffect } from "react";
 import { AppIcon, appColors } from "../../components/common/designSystem";
-import { getStoredToken } from "../../services/authService";
-import notificationService from "../../services/notificationService";
-import * as Device from "expo-device";
-import { Platform } from "react-native";
+import { getStoredToken, getStoredUser } from "../../services/authService";
+import {
+  cleanupOnLogout,
+  stopNotificationsPolling,
+  startNotificationsPolling,
+  ensureDeviceRegistration,
+  addNotificationListener,
+  shouldProcessForegroundNotification,
+  saveLocalNotification,
+  fetchNotificationsFromBackend,
+  clearNotificationListeners,
+} from "../../services/notificationService";
+import { Platform, type ColorValue } from "react-native";
+import * as Notifications from "expo-notifications";
 
 export default function AppLayout() {
   const router = useRouter();
 
   const verifyAuth = useCallback(async () => {
     const token = await getStoredToken();
-    console.log("[layout] verifyAuth", { hasToken: Boolean(token) });
-    if (!token) {
+    const user = await getStoredUser();
+    console.log("[layout] verifyAuth", { hasToken: Boolean(token), hasUser: Boolean(user?.id) });
+    if (!token || !user?.id) {
+      cleanupOnLogout();
+      stopNotificationsPolling();
       router.replace("/");
     }
   }, [router]);
@@ -23,84 +36,144 @@ export default function AppLayout() {
 
   // initialize notifications when app layout mounts and user is authenticated
   useEffect(() => {
-    let unsub = null;
+    let unsub: (() => void) | null = null;
     const init = async () => {
       const token = await getStoredToken();
-      if (!token) return;
-
-      const perm = await notificationService.requestNotificationPermission();
-      if ((perm && perm.status === "granted") || perm.status === "granted") {
-        try {
-          await notificationService.retryPendingDeviceRegistration();
-        } catch (err) {
-          // ignore pending retry errors
-        }
-
-        try {
-          const deviceToken = await notificationService.getExpoPushTokenAsync();
-          const platform = (Device.osName || Platform.OS || "unknown").toLowerCase();
-          const deviceId = await notificationService.getNotificationDeviceId();
-          if (deviceToken) {
-            try {
-              await notificationService.registerDeviceWithBackend({ token: deviceToken, platform, device_id: deviceId });
-            } catch (err) {
-              // register failed - will retry later
-            }
-          }
-        } catch (e) {
-          // ignore
-        }
+      const user = await getStoredUser();
+      if (!token || !user?.id) {
+        cleanupOnLogout();
+        stopNotificationsPolling();
+        return;
       }
 
-      unsub = notificationService.addNotificationListener({
-        onReceived: (n) => {
-          // save locally
-          const payload = n.request.content;
-          void notificationService.saveLocalNotification({
-            id: payload.data?.id || `${Date.now()}`,
-            title: payload.title,
-            body: payload.body,
-            data: payload.data || {},
-            read: false,
-            received_at: new Date().toISOString(),
-          });
-        },
-        onResponse: (r) => {
-          // navigate on tap
-          const data = r.notification.request.content.data || {};
-          const trimmedAlertId = data?.alert_id || data?.alertId || data?.alertid || null;
-          const target =
-            data?.target ||
-            (data?.type === "SOS" && trimmedAlertId ? `/alerts?alert_id=${trimmedAlertId}` : null);
-          if (target) {
+      await startNotificationsPolling();
+      try {
+        await ensureDeviceRegistration();
+      } catch {
+        // ignore registration errors; the service will retry later
+      }
+
+      const handleNotificationResponse = async (response: Notifications.NotificationResponse) => {
+        const actionIdentifier = response?.actionIdentifier || null;
+        const data = response?.notification?.request?.content?.data || {};
+        const notificationId = data?.id || data?.notification_id || null;
+        const trimmedAlertId = data?.alert_id || data?.alertId || data?.alertid || null;
+        const target =
+          data?.target ||
+          (data?.type === "SOS" && trimmedAlertId ? `/alerts?alert_id=${trimmedAlertId}` : null) ||
+          "/notifications";
+
+        if (actionIdentifier === "dismiss") {
+          try {
+            const identifier = response?.notification?.request?.identifier;
+            if (identifier) {
+              await Notifications.dismissNotificationAsync(identifier);
+            }
+          } catch {
+            // ignore dismissal errors
+          }
+          return;
+        }
+
+        if (actionIdentifier === "accept" || actionIdentifier === "view") {
+          const baseTarget = "/notifications";
+          const detailTarget = notificationId ? `${baseTarget}?selectedId=${encodeURIComponent(String(notificationId))}` : baseTarget;
+          try {
+            setTimeout(() => {
+              try {
+                router.push(detailTarget);
+              } catch {
+                // ignore navigation errors
+              }
+            }, 0);
+          } catch {
+            // ignore navigation errors
+          }
+          return;
+        }
+
+        try {
+          setTimeout(() => {
             try {
               router.push(target);
-            } catch (e) {
+            } catch {
               // ignore navigation errors
+            }
+          }, 0);
+        } catch {
+          // ignore navigation errors
+        }
+      };
+
+      unsub = addNotificationListener({
+        onReceived: async (n: Notifications.Notification) => {
+          const payload = n.request.content;
+          const notificationData = payload.data || {};
+          const notificationId = notificationData.id || notificationData.notification_id || null;
+          if (!shouldProcessForegroundNotification(notificationId)) {
+            return;
+          }
+
+          const notificationEntry = {
+            id: notificationId || `${Date.now()}`,
+            title: payload.title || "New notification",
+            body: payload.body || "You have a new notification",
+            data: notificationData,
+            read: false,
+            received_at: new Date().toISOString(),
+            kind: notificationData.type || payload.data?.kind || "GENERAL",
+          };
+
+          await saveLocalNotification(notificationEntry);
+          try {
+            await fetchNotificationsFromBackend();
+          } catch {
+            // ignore refresh errors
+          }
+
+          if (Platform.OS !== "web") {
+            try {
+              await Notifications.scheduleNotificationAsync({
+                content: {
+                  title: notificationEntry.title,
+                  body: notificationEntry.body,
+                  data: notificationEntry.data,
+                  categoryIdentifier: notificationData.type === "SOS" || notificationData.type === "EMERGENCY" ? "sos-alert" : undefined,
+                },
+                trigger: null,
+              });
+            } catch {
+              // ignore foreground presentation errors
             }
           }
         },
+        onResponse: handleNotificationResponse,
       });
+
+      try {
+        const lastResponse = await Notifications.getLastNotificationResponseAsync();
+        if (lastResponse) {
+          handleNotificationResponse(lastResponse);
+        }
+      } catch {
+        // ignore initial-response lookup errors
+      }
     };
 
     void init();
     return () => {
       if (unsub) unsub();
+      clearNotificationListeners();
+      stopNotificationsPolling();
     };
   }, [router]);
-
-  useFocusEffect(
-    useCallback(() => {
-      void verifyAuth();
-    }, [verifyAuth])
-  );
 
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: appColors.blue,
-        tabBarInactiveTintColor: appColors.slate,
+        tabBarActiveTintColor: appColors.blue as ColorValue,
+        tabBarInactiveTintColor: appColors.slate as ColorValue,
         tabBarStyle: {
           backgroundColor: "#ffffff",
           borderTopColor: appColors.border,

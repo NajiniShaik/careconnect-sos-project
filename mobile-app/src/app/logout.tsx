@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useRouter } from "expo-router";
 import { clearAuth } from "../services/authService";
+import notificationService from "../services/notificationService";
 
 export default function LogoutScreen() {
   const router = useRouter();
@@ -9,6 +10,7 @@ export default function LogoutScreen() {
     const performLogout = async () => {
       try {
         console.log("[logout-route] Starting logout...");
+        notificationService.cleanupOnLogout();
         await clearAuth();
         console.log("[logout-route] Auth cleared, redirecting to index...");
         

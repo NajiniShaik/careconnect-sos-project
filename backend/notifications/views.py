@@ -4,7 +4,9 @@ from rest_framework.response import Response
 from rest_framework import status
 import logging
 
+from django.contrib.auth import get_user_model
 from django.utils import timezone
+from django.db.models import Q
 
 from .models import DeviceToken, Notification, NotificationDelivery
 from .serializers import RegisterDeviceSerializer
@@ -25,15 +27,40 @@ class RegisterDeviceView(APIView):
             return Response({"success": False, "message": "Token cannot be blank"}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
+            platform = serializer.validated_data.get("platform") or "android"
+            device_id = serializer.validated_data.get("device_id") or ""
+
+            if not device_id:
+                device_id = f"user-{request.user.pk}"
+
+            existing_token_users = []
+            if device_token:
+                existing_token_users = list(
+                    get_user_model().objects.filter(device_token=device_token).exclude(pk=request.user.pk)
+                )
+
+            for existing_user in existing_token_users:
+                if getattr(existing_user, "device_token", None) == device_token:
+                    existing_user.device_token = ""
+                    existing_user.save(update_fields=["device_token"])
+
+            DeviceToken.objects.filter(token=device_token).exclude(user=request.user).delete()
+            DeviceToken.objects.filter(user=request.user).filter(Q(device_id=device_id) | Q(token=device_token)).exclude(token=device_token).delete()
+
             request.user.device_token = device_token
             request.user.save(update_fields=["device_token"])
 
             DeviceToken.objects.update_or_create(
                 user=request.user,
-                token=device_token,
-                defaults={"platform": "android", "device_id": "", "updated_at": timezone.now()},
+                device_id=device_id,
+                defaults={
+                    "token": device_token,
+                    "platform": platform,
+                    "updated_at": timezone.now(),
+                },
             )
-            logger.info("Registered device token for user %s via notifications endpoint", request.user.pk)
+
+            logger.info("Registered device token for user %s via notifications endpoint platform=%s device_id=%s", request.user.pk, platform, device_id or "")
             return Response({"success": True, "message": "Device token registered successfully."}, status=status.HTTP_200_OK)
         except Exception as exc:
             logger.exception("Failed to save device token for user %s: %s", request.user.pk, exc)
@@ -63,12 +90,11 @@ class NotificationListView(APIView):
 
     def get(self, request):
         role = str(getattr(request.user, "role", "") or "").upper()
-        if role == "ADMIN":
-            notifications = Notification.objects.all().order_by("-created_at", "id")
-        elif role == "SECURITY":
-            notifications = Notification.objects.filter(user__role="SECURITY").order_by("-created_at", "id")
-        else:
-            notifications = Notification.objects.filter(user=request.user).order_by("-created_at", "id")
+        unread_only = str(request.query_params.get("unread_only") or "").lower() in {"1", "true", "yes", "on"}
+        base_qs = Notification.objects.all() if role == "ADMIN" else Notification.objects.filter(user__role="SECURITY") if role == "SECURITY" else Notification.objects.filter(user=request.user)
+        notifications = base_qs.order_by("-created_at", "id")
+        if unread_only:
+            notifications = notifications.filter(read=False)
         data = []
         for item in notifications:
             deliveries = [

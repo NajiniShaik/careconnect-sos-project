@@ -1,8 +1,17 @@
-import React, { useEffect, useState, useCallback, useMemo } from "react";
-import { View, Text, StyleSheet, FlatList, RefreshControl, Pressable, Modal, Alert, Platform } from "react-native";
-import { useRouter, useFocusEffect } from "expo-router";
+// @ts-nocheck
+import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { View, Text, StyleSheet, VirtualizedList, RefreshControl, Pressable, Modal, Alert, Platform } from "react-native";
+
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { AppScreen, PageHeader, AppButton, appColors, AppIcon } from "../../components/common/designSystem";
-import notificationService from "../../services/notificationService";
+import {
+  fetchNotificationsFromBackend,
+  subscribeToNotificationUpdates,
+  getNotificationPermissionStatus,
+  markAllRead,
+  requestNotificationPermission,
+  deleteNotification,
+} from "../../services/notificationService";
 
 const FILTER_OPTIONS = [
   { key: "all", label: "All" },
@@ -40,22 +49,48 @@ function formatRelativeTime(timestamp) {
 
 export default function NotificationsRoute() {
   const router = useRouter();
+  const params = useLocalSearchParams();
   const [items, setItems] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
   const [activeFilter, setActiveFilter] = useState("all");
+  const [selectedNotificationId, setSelectedNotificationId] = useState(null);
   const [showPermissionModal, setShowPermissionModal] = useState(false);
   const [permissionFlowStep, setPermissionFlowStep] = useState("request");
+  const listRef = useRef(null);
 
   const load = useCallback(async () => {
-    const list = await notificationService.fetchNotificationsFromBackend();
+    const list = await fetchNotificationsFromBackend();
     setItems(Array.isArray(list) ? list : []);
   }, []);
 
   useEffect(() => {
+    setSelectedNotificationId(params?.selectedId ? String(params.selectedId) : null);
+  }, [params?.selectedId]);
+
+  useEffect(() => {
+    if (!selectedNotificationId || !listRef.current || items.length === 0) return;
+    const index = items.findIndex((item) => String(item?.id) === String(selectedNotificationId));
+    if (index < 0) return;
+    setTimeout(() => {
+      try {
+        listRef.current?.scrollToIndex?.({ index, animated: true });
+      } catch {
+        // ignore scroll errors
+      }
+    }, 80);
+  }, [selectedNotificationId, items]);
+
+  useEffect(() => {
     let mounted = true;
+    const unsubscribe = subscribeToNotificationUpdates(() => {
+      if (mounted) {
+        void load();
+      }
+    });
+
     (async () => {
       if (!mounted) return;
-      const status = await notificationService.getNotificationPermissionStatus();
+      const status = await getNotificationPermissionStatus();
       setPermissionFlowStep("request");
       if (status !== "granted" && status !== "denied" && status !== "expo_go") {
         setShowPermissionModal(true);
@@ -64,15 +99,9 @@ export default function NotificationsRoute() {
     })();
     return () => {
       mounted = false;
+      unsubscribe();
     };
   }, [load]);
-
-  useFocusEffect(
-    useCallback(() => {
-      void load();
-      return undefined;
-    }, [load])
-  );
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -87,31 +116,16 @@ export default function NotificationsRoute() {
     return items.filter((item) => getNotificationType(item) === activeFilter);
   }, [items, activeFilter]);
 
-  const handleMarkRead = async (id) => {
-    const next = await notificationService.markNotificationRead(id);
-    setItems(next);
-  };
-
   const handleMarkAll = async () => {
-    const next = await notificationService.markAllRead();
+    const next = await markAllRead();
     setItems(next);
   };
 
   const handleAllowNotifications = async () => {
-    const result = await notificationService.requestNotificationPermission();
+    const result = await requestNotificationPermission();
     if (result?.status === "granted") {
       setPermissionFlowStep("success");
       setShowPermissionModal(true);
-      try {
-        const deviceToken = await notificationService.getExpoPushTokenAsync();
-        const platform = "mobile";
-        const deviceId = await notificationService.getNotificationDeviceId();
-        if (deviceToken) {
-          await notificationService.registerDeviceWithBackend({ token: deviceToken, platform, device_id: deviceId });
-        }
-      } catch (err) {
-        // ignore registration failures, keep UX smooth
-      }
     } else {
       setShowPermissionModal(false);
       setPermissionFlowStep("request");
@@ -146,7 +160,7 @@ export default function NotificationsRoute() {
 
     if (!confirmed) return;
 
-    const next = await notificationService.deleteNotification(id);
+    const next = await deleteNotification(id);
     setItems(Array.isArray(next) ? next : []);
   };
 
@@ -155,15 +169,18 @@ export default function NotificationsRoute() {
     const icon = ICONS[type] || ICONS.general;
     const title = type === "sos" ? "Emergency SOS Alert" : "System Update";
     const subtitle = item.body || "No description available.";
+    const isSelected = selectedNotificationId && String(item.id) === String(selectedNotificationId);
 
     return (
       <Pressable
         key={item.id}
         onPress={() => {
-          if (item.data?.target) router.push(item.data.target);
+          if (item.data?.target) {
+            router.push(item.data.target);
+          }
           handleMarkRead(item.id);
         }}
-        style={[styles.card, !item.read && styles.unreadCard]}
+        style={[styles.card, !item.read && styles.unreadCard, isSelected && styles.selectedCard]}
       >
         <View style={styles.cardHeaderRow}>
           <View style={[styles.iconDot, { backgroundColor: icon.color }]}>
@@ -238,31 +255,39 @@ export default function NotificationsRoute() {
         subtitle="Stay informed about alerts, announcements, and society updates."
       />
 
-      <View style={styles.filterRow}>{FILTER_OPTIONS.map(renderFilterPill)}</View>
-
-      <View style={styles.topBar}>
-        <Text style={styles.summaryText}>{unreadCount} unread</Text>
-        <View style={styles.topButtons}>
-          <AppButton title="Mark all read" onPress={handleMarkAll} variant="secondary" />
-          <AppButton title="Refresh" onPress={onRefresh} variant="ghost" />
-        </View>
-      </View>
-
-      {filteredItems.length === 0 ? (
-        <View style={styles.emptyState}>
-          <Text style={styles.emptyTitle}>No notifications yet</Text>
-          <Text style={styles.emptyMessage}>Your notification feed is empty right now. Pull to refresh.</Text>
-        </View>
-      ) : (
-        <FlatList
-          data={filteredItems}
-          keyExtractor={(item) => String(item.id || item.received_at || Math.random())}
-          renderItem={({ item }) => renderNotificationCard(item)}
-          contentContainerStyle={styles.listContent}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={appColors.blue} />}
-          showsVerticalScrollIndicator={false}
-        />
-      )}
+      <VirtualizedList
+        ref={listRef}
+        data={filteredItems}
+        initialNumToRender={10}
+        maxToRenderPerBatch={10}
+        windowSize={5}
+        getItemCount={(data) => data.length}
+        getItem={(data, index) => data[index]}
+        keyExtractor={(item) => String(item.id || item.received_at || Math.random())}
+        renderItem={({ item }) => renderNotificationCard(item)}
+        contentContainerStyle={styles.listContent}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={appColors.blue} />}
+        showsVerticalScrollIndicator={false}
+        ListHeaderComponent={(
+          <View>
+            <View style={styles.filterRow}>{FILTER_OPTIONS.map(renderFilterPill)}</View>
+            <View style={styles.topBar}>
+              <Text style={styles.summaryText}>{unreadCount} unread</Text>
+              <View style={styles.topButtons}>
+                <AppButton title="Mark all read" onPress={handleMarkAll} variant="secondary" />
+                <AppButton title="Refresh" onPress={onRefresh} variant="ghost" />
+              </View>
+            </View>
+          </View>
+        )}
+        ListEmptyComponent={(
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyTitle}>No notifications yet</Text>
+            <Text style={styles.emptyMessage}>Your notification feed is empty right now. Pull to refresh.</Text>
+          </View>
+        )}
+        ListFooterComponent={<View style={styles.listFooter} />}
+      />
 
       {permissionModal}
     </AppScreen>
@@ -271,6 +296,7 @@ export default function NotificationsRoute() {
 
 const styles = StyleSheet.create({
   listContent: { paddingBottom: 32 },
+  listFooter: { height: 16 },
   filterRow: { flexDirection: "row", gap: 10, marginBottom: 16, flexWrap: "wrap" },
   filterPill: { borderRadius: 999, paddingVertical: 10, paddingHorizontal: 16, borderWidth: 1 },
   filterPillActive: { borderColor: appColors.blue, backgroundColor: appColors.blueSoft },
@@ -282,6 +308,7 @@ const styles = StyleSheet.create({
   topButtons: { flexDirection: "row", gap: 10 },
   card: { borderRadius: 18, backgroundColor: appColors.white, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: appColors.border },
   unreadCard: { backgroundColor: appColors.blueSoft },
+  selectedCard: { borderColor: appColors.blue, borderWidth: 2, backgroundColor: "rgba(59, 130, 246, 0.08)" },
   cardHeaderRow: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 12 },
   iconDot: { width: 40, height: 40, borderRadius: 12, justifyContent: "center", alignItems: "center" },
   cardHeaderText: { flex: 1 },
@@ -298,6 +325,7 @@ const styles = StyleSheet.create({
   modalOverlay: { flex: 1, backgroundColor: "rgba(15, 23, 42, 0.35)", justifyContent: "center", alignItems: "center", padding: 20 },
   modalContainer: { width: "100%", maxWidth: 520, gap: 16 },
   permissionCard: { backgroundColor: appColors.white, borderRadius: 22, padding: 24, borderWidth: 1, borderColor: appColors.border, shadowColor: appColors.shadow, shadowOpacity: 0.16, shadowRadius: 30, shadowOffset: { width: 0, height: 12 }, elevation: 8 },
+  permissionSuccessCard: {},
   permissionBadge: { width: 56, height: 56, borderRadius: 18, justifyContent: "center", alignItems: "center", backgroundColor: appColors.blue, marginBottom: 18 },
   permissionBadgeSuccess: { backgroundColor: appColors.green },
   permissionHeading: { fontSize: 22, fontWeight: "800", color: appColors.navy, marginBottom: 10 },

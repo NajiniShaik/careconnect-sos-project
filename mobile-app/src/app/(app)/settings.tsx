@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, Modal, Pressable } from "react-native";
 import { useRouter } from "expo-router";
 import { AppScreen, PageHeader, SectionCard, AppButton, appColors } from "../../components/common/designSystem";
 import { getStoredUser, clearAuth } from "../../services/authService";
+import notificationService from "../../services/notificationService";
 
 export default function SettingsRoute() {
   const router = useRouter();
@@ -24,6 +25,7 @@ export default function SettingsRoute() {
     try {
       console.log("[settings] Starting logout...");
       setIsLoggingOut(true);
+      notificationService.cleanupOnLogout();
       await clearAuth();
       console.log("[settings] Auth cleared, navigating to root...");
       setShowLogoutModal(false);
