@@ -7,7 +7,8 @@ from rest_framework import generics
 from .models import (
     User, 
     ResidentProfile, 
-    EmergencyContact
+    EmergencyContact,
+    VolunteerProfile,
 )
 
 from .serializers import (
@@ -20,6 +21,7 @@ from .serializers import (
     VolunteerRegisterSerializer,
     SecurityRegisterSerializer,
     EmergencyContactSerializer,
+    VolunteerAvailabilitySerializer,
 )
 
 from rest_framework.response import Response
@@ -227,6 +229,31 @@ class VerifyOTPView(APIView):
             {"error": "Invalid OTP"},
             status=status.HTTP_400_BAD_REQUEST,
         )
+
+
+class VolunteerAvailabilityView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get_object(self, request):
+        profile, _ = VolunteerProfile.objects.get_or_create(user=request.user)
+        return profile
+
+    def get(self, request):
+        profile = self.get_object(request)
+        serializer = VolunteerAvailabilitySerializer(profile)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def put(self, request):
+        profile = self.get_object(request)
+        if request.user.role != User.Role.VOLUNTEER:
+            return Response({"detail": "Only volunteers can update availability"}, status=status.HTTP_403_FORBIDDEN)
+
+        serializer = VolunteerAvailabilitySerializer(profile, data=request.data, partial=True)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class ResidentProfileViewSet(viewsets.ModelViewSet):

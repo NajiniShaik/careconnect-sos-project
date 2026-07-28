@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { deleteAsync } from "expo-file-system/legacy";
 import * as Location from "expo-location";
@@ -12,25 +12,8 @@ import { WebView } from "react-native-webview";
 import {
   startWebRecording,
   stopWebRecording,
-  playWebAudio,
-  deleteWebAudio
+  playWebAudio
 } from "./webAudio";
-
-let MapView = null;
-let Marker = null;
-let UrlTile = null;
-
-
-if (Platform.OS !== "web") {
-  try {
-    const maps = require("react-native-maps");
-    MapView = maps?.default || maps?.MapView || null;
-    Marker = maps?.Marker || null;
-    UrlTile = maps?.UrlTile || null;
-  } catch (error) {
-    console.log("[sos-workflow] react-native-maps unavailable", error);
-  }
-}
 
 const severityOptions = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
 
@@ -43,6 +26,32 @@ function formatDuration(milliseconds = 0) {
 
 
 function LeafletMapPicker({ coordinates, onLocationSelect, interactive = true }) {
+  const handleMessageData = useCallback((dataString) => {
+    try {
+      const data = typeof dataString === "string" ? JSON.parse(dataString) : dataString;
+      if (data?.latitude && data?.longitude && onLocationSelect) {
+        onLocationSelect({ latitude: data.latitude, longitude: data.longitude });
+      }
+    } catch (e) {
+      console.error("Error parsing map coordinates", e);
+    }
+  }, [onLocationSelect]);
+
+  useEffect(() => {
+    if (Platform.OS === "web") {
+      const handleWebMessage = (event) => {
+        if (event.data) {
+          handleMessageData(event.data);
+        }
+      };
+
+      window.addEventListener("message", handleWebMessage);
+      return () => {
+        window.removeEventListener("message", handleWebMessage);
+      };
+    }
+  }, [handleMessageData]);
+
   if (!coordinates) return null;
 
   const htmlContent = `
@@ -103,32 +112,6 @@ function LeafletMapPicker({ coordinates, onLocationSelect, interactive = true })
     </body>
     </html>
   `;
-
-  const handleMessageData = (dataString) => {
-    try {
-      const data = typeof dataString === "string" ? JSON.parse(dataString) : dataString;
-      if (data?.latitude && data?.longitude && onLocationSelect) {
-        onLocationSelect({ latitude: data.latitude, longitude: data.longitude });
-      }
-    } catch (e) {
-      console.error("Error parsing map coordinates", e);
-    }
-  };
-
-  useEffect(() => {
-    if (Platform.OS === "web") {
-      const handleWebMessage = (event) => {
-        if (event.data) {
-          handleMessageData(event.data);
-        }
-      };
-
-      window.addEventListener("message", handleWebMessage);
-      return () => {
-        window.removeEventListener("message", handleWebMessage);
-      };
-    }
-  }, [onLocationSelect]);
 
   if (Platform.OS === "web") {
     return (
@@ -491,14 +474,6 @@ export default function SosWorkflowWizard({ user, onClose }) {
       playbackState: playerStatus?.playbackState,
     });
   }, [playerStatus]);
-
-  const previewUri = useMemo(() => {
-    if (!locationState.coordinates) {
-      return null;
-    }
-
-    return `https://staticmap.openstreetmap.de/staticmap.php?center=${locationState.coordinates.latitude},${locationState.coordinates.longitude}&zoom=15&size=320x180&markers=${locationState.coordinates.latitude},${locationState.coordinates.longitude},red-pushpin`;
-  }, [locationState.coordinates]);
 
   const getAudioFileName = (uri) => {
     if (!uri) return "voice-note.m4a";

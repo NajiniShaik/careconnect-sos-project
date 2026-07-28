@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 from pathlib import Path
 
 import os
+from celery.schedules import crontab
 from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -201,3 +202,9 @@ CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'Asia/Kolkata'  # or your preferred timezone
+CELERY_BEAT_SCHEDULE = {
+    'process-guardian-escalation': {
+        'task': 'notifications.process_guardian_escalation_task',
+        'schedule': crontab(minute='*'),
+    },
+}

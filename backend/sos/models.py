@@ -1,6 +1,7 @@
 # Create your models here.
 from django.db import models
 from django.conf import settings
+from django.utils import timezone
 
 
 class SOS(models.Model):
@@ -49,11 +50,56 @@ class SOS(models.Model):
         default="HIGH"
     )
 
+    escalation_level = models.PositiveIntegerField(default=0)
+    guardian_response_at = models.DateTimeField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return f"SOS({self.user.username}) - {self.status}"
+
+    def record_status_event(self, status, details="", occurred_at=None):
+        event = SOSStatusEvent.objects.create(
+            sos=self,
+            status=status,
+            details=details,
+            occurred_at=occurred_at or timezone.now(),
+        )
+        self.save(update_fields=["updated_at"])
+        return event
+
+    def get_current_lifecycle_status(self):
+        latest_event = self.status_events.order_by("-occurred_at", "-id").first()
+        return latest_event.status if latest_event else self.status
+
+    def get_status_timeline(self):
+        return list(self.status_events.order_by("occurred_at", "id"))
+
+
+class SOSStatusEvent(models.Model):
+    STATUS_CHOICES = [
+        ("TRIGGERED", "Triggered"),
+        ("GUARDIAN_NOTIFIED", "Guardian Notified"),
+        ("GUARDIAN_RESPONDED", "Guardian Responded"),
+        ("AUTO_ESCALATED", "Auto Escalated"),
+        ("VOLUNTEER_NOTIFIED", "Volunteer Notified"),
+        ("VOLUNTEER_ACCEPTED", "Volunteer Accepted"),
+        ("SECURITY_NOTIFIED", "Security Notified"),
+        ("SECURITY_RESPONDED", "Security Responded"),
+        ("INCIDENT_CLOSED", "Incident Closed"),
+    ]
+
+    sos = models.ForeignKey(SOS, on_delete=models.CASCADE, related_name="status_events")
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES)
+    details = models.TextField(blank=True, default="")
+    occurred_at = models.DateTimeField(default=timezone.now)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("occurred_at", "id")
+
+    def __str__(self):
+        return f"{self.sos_id}:{self.status}"
 
 
 class SOSMessage(models.Model):

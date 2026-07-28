@@ -5,7 +5,7 @@ import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
 import { useLocalSearchParams } from "expo-router";
 import { AppButton, AppScreen, PageHeader, SectionCard, StatusBadge, appColors } from "../../components/common/designSystem";
 import { getStoredUser } from "../../services/authService";
-import { deleteSosAlert, fetchSosAlerts, fetchSosCategories, fetchSosMessages, mergeSosMessages, normalizeSosHistory, postSosMessage, resolveSosAlert, retrySosTranscription, updateSosIncident } from "../../services/sosService";
+import { declineSosAlert, deleteSosAlert, fetchSosAlerts, fetchSosCategories, fetchSosMessages, mergeSosMessages, navigateToSosLocation, normalizeSosHistory, openSosLocation, postSosMessage, respondToSosAlert, resolveSosAlert, retrySosTranscription, updateSosIncident } from "../../services/sosService";
 
 function normalizeCategoryValue(value) {
   return String(value || "").trim().toLowerCase();
@@ -122,6 +122,10 @@ export default function AlertsRoute() {
   const [messageSuccessByAlert, setMessageSuccessByAlert] = useState({});
   const [playingVoiceNoteUrl, setPlayingVoiceNoteUrl] = useState(null);
   const [transcriptionLoadingByAlert, setTranscriptionLoadingByAlert] = useState({});
+  const [guardianResponseStateByAlert, setGuardianResponseStateByAlert] = useState({});
+  const [guardianResponseLoadingByAlert, setGuardianResponseLoadingByAlert] = useState({});
+  const [guardianResponseErrorByAlert, setGuardianResponseErrorByAlert] = useState({});
+  const [guardianResponseSuccessByAlert, setGuardianResponseSuccessByAlert] = useState({});
 
   const voiceNotePlayer = useAudioPlayer(playingVoiceNoteUrl, { downloadFirst: true });
   const voiceNotePlayerStatus = useAudioPlayerStatus(voiceNotePlayer);
@@ -190,6 +194,7 @@ export default function AlertsRoute() {
   const isAdmin = role === "ADMIN";
   const isSecurity = role === "SECURITY";
   const isResident = role === "RESIDENT";
+  const isGuardian = role === "GUARDIAN";
 
   useEffect(() => {
     const selectedAlertId = String(params?.alert_id || params?.alertId || params?.alertid || "").trim();
@@ -388,6 +393,63 @@ export default function AlertsRoute() {
       setMessagePostingByAlert((prev) => ({ ...prev, [alertId]: false }));
     }
   }, [loadAlertMessages, messageDraftsByAlert, user]);
+
+  const handleGuardianRespond = useCallback(async (alert, action = "accept") => {
+    const alertId = getAlertIdentifier(alert);
+    if (!alertId) {
+      return;
+    }
+
+    const alertKey = String(alertId);
+    if (guardianResponseStateByAlert[alertKey]?.status) {
+      return;
+    }
+
+    setGuardianResponseLoadingByAlert((prev) => ({ ...prev, [alertKey]: true }));
+    setGuardianResponseErrorByAlert((prev) => ({ ...prev, [alertKey]: "" }));
+    setGuardianResponseSuccessByAlert((prev) => ({ ...prev, [alertKey]: "" }));
+
+    try {
+      const response = action === "decline"
+        ? await declineSosAlert(alertId, "decline")
+        : await respondToSosAlert(alertId, "accept");
+
+      const responseData = response?.data || {};
+      const successMessage = action === "decline"
+        ? "You marked the SOS as unable to respond."
+        : "You accepted the SOS response request.";
+
+      setGuardianResponseStateByAlert((prev) => ({
+        ...prev,
+        [alertKey]: {
+          status: action === "decline" ? "declined" : "accepted",
+          message: responseData?.message || successMessage,
+        },
+      }));
+      setGuardianResponseSuccessByAlert((prev) => ({ ...prev, [alertKey]: responseData?.message || successMessage }));
+    } catch (error) {
+      console.log("[alerts] Failed to submit guardian response", error);
+      setGuardianResponseErrorByAlert((prev) => ({
+        ...prev,
+        [alertKey]: error?.response?.data?.detail || error?.response?.data?.message || "Unable to update your response right now.",
+      }));
+    } finally {
+      setGuardianResponseLoadingByAlert((prev) => ({ ...prev, [alertKey]: false }));
+    }
+  }, [guardianResponseStateByAlert]);
+
+  const handleOpenMapLocation = useCallback(async (alert, mode = "view") => {
+    try {
+      if (mode === "navigate") {
+        await navigateToSosLocation(alert);
+      } else {
+        await openSosLocation(alert);
+      }
+    } catch (error) {
+      console.log("[alerts] Failed to open location", error);
+      Alert.alert("Unable to open location", "The alert location could not be opened right now.");
+    }
+  }, []);
 
   const handleRefreshLocation = useCallback(async (alert) => {
     if (!alert?.id || !isAlertOwnedByUser(alert, user)) {
@@ -615,6 +677,55 @@ export default function AlertsRoute() {
                     ) : null}
                     <Text style={styles.metaText}>{formatAlertTime(alert.created_at)}</Text>
                     {alert.location && !(isSecurity || isAdmin) ? <Text style={styles.metaText}>{alert.location}</Text> : null}
+                    {isGuardian ? (
+                      <View style={styles.guardianSection}>
+                        <View style={styles.guardianHeaderRow}>
+                          <Text style={styles.guardianTitle}>Guardian response</Text>
+                          <Text style={styles.guardianHint}>Reply to the resident request.</Text>
+                        </View>
+
+                        <Text style={styles.metaText}>Resident: {alert.user || "Unknown"}</Text>
+                        {alert.location ? <Text style={styles.metaText}>Location: {alert.location}</Text> : null}
+
+                        <View style={styles.actionRow}>
+                          <AppButton
+                            title={guardianResponseLoadingByAlert[String(alert.id)] ? "Working..." : guardianResponseStateByAlert[String(alert.id)]?.status === "accepted" ? "Accepted" : "Accept / I'm on my way"}
+                            onPress={() => void handleGuardianRespond(alert, "accept")}
+                            variant="primary"
+                            style={styles.actionButton}
+                            loading={guardianResponseLoadingByAlert[String(alert.id)]}
+                            disabled={Boolean(guardianResponseStateByAlert[String(alert.id)]?.status)}
+                          />
+                          <AppButton
+                            title={guardianResponseLoadingByAlert[String(alert.id)] ? "Working..." : guardianResponseStateByAlert[String(alert.id)]?.status === "declined" ? "Declined" : "Cannot respond"}
+                            onPress={() => void handleGuardianRespond(alert, "decline")}
+                            variant="secondary"
+                            style={styles.actionButton}
+                            loading={guardianResponseLoadingByAlert[String(alert.id)]}
+                            disabled={Boolean(guardianResponseStateByAlert[String(alert.id)]?.status)}
+                          />
+                        </View>
+
+                        <View style={styles.actionRow}>
+                          <AppButton
+                            title="View location"
+                            onPress={() => void handleOpenMapLocation(alert, "view")}
+                            variant="secondary"
+                            style={styles.actionButton}
+                          />
+                          <AppButton
+                            title="Navigate"
+                            onPress={() => void handleOpenMapLocation(alert, "navigate")}
+                            variant="secondary"
+                            style={styles.actionButton}
+                          />
+                        </View>
+
+                        {guardianResponseErrorByAlert[String(alert.id)] ? <Text style={styles.messageError}>{guardianResponseErrorByAlert[String(alert.id)]}</Text> : null}
+                        {guardianResponseSuccessByAlert[String(alert.id)] ? <Text style={styles.successText}>{guardianResponseSuccessByAlert[String(alert.id)]}</Text> : null}
+                      </View>
+                    ) : null}
+
                     {isAdmin ? (
                       <View style={styles.actionRow}>
                         <AppButton
@@ -815,6 +926,10 @@ const styles = StyleSheet.create({
   metaText: { color: appColors.muted, fontSize: 12, marginTop: 4 },
   actionRow: { flexDirection: "row", gap: 8, marginTop: 10 },
   actionButton: { flex: 1 },
+  guardianSection: { marginTop: 10, borderTopWidth: 1, borderTopColor: appColors.border, paddingTop: 10 },
+  guardianHeaderRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 },
+  guardianTitle: { color: appColors.navy, fontSize: 13, fontWeight: "700" },
+  guardianHint: { color: appColors.blue, fontSize: 11, fontWeight: "700" },
   updateSection: { marginTop: 10, borderTopWidth: 1, borderTopColor: appColors.border, paddingTop: 10 },
   updateToggle: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 },
   updateTitle: { color: appColors.navy, fontSize: 13, fontWeight: "700" },

@@ -1,15 +1,284 @@
 import time
+from datetime import timedelta
 from unittest.mock import patch, Mock
 
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from rest_framework.test import APIClient
 from rest_framework import status
 
-from notifications.models import Notification
-from .models import SOS, SOSMessage
+from notifications.models import Notification, NotificationDelivery, EscalationLog
+from society.models import Society
+from users.models import ResidentProfile
+from .models import SOS, SOSMessage, SOSStatusEvent
 from .serializers import SOSSerializer
+
+
+class SOSStatusTrackingTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user_model = get_user_model()
+        self.admin_user = self.user_model.objects.create_user(
+            username="admin_status",
+            email="admin_status@example.com",
+            password="testpass123",
+            role="ADMIN",
+        )
+        self.resident_user = self.user_model.objects.create_user(
+            username="resident_status",
+            email="resident_status@example.com",
+            password="testpass123",
+            role="RESIDENT",
+        )
+        self.other_resident = self.user_model.objects.create_user(
+            username="resident_other",
+            email="resident_other@example.com",
+            password="testpass123",
+            role="RESIDENT",
+        )
+
+    def test_sos_creation_creates_triggered_status_event(self):
+        self.client.force_authenticate(user=self.resident_user)
+        response = self.client.post(
+            "/api/sos/trigger/",
+            {"message": "Need help", "location": "Block 5", "category": "medical"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        sos = SOS.objects.get(pk=response.data["id"])
+        self.assertTrue(SOSStatusEvent.objects.filter(sos=sos, status="TRIGGERED").exists())
+
+    def test_status_transitions_are_preserved_in_history(self):
+        sos = SOS.objects.create(user=self.resident_user, message="Need help", location="Block 5", category="medical")
+        sos.record_status_event("GUARDIAN_NOTIFIED", details="Guardian notified")
+        sos.record_status_event("GUARDIAN_RESPONDED", details="Guardian responded")
+        sos.record_status_event("INCIDENT_CLOSED", details="Closed")
+
+        events = list(sos.status_events.order_by("occurred_at", "id"))
+        self.assertEqual([event.status for event in events], ["GUARDIAN_NOTIFIED", "GUARDIAN_RESPONDED", "INCIDENT_CLOSED"])
+        self.assertEqual(events[0].details, "Guardian notified")
+        self.assertEqual(sos.get_current_lifecycle_status(), "INCIDENT_CLOSED")
+
+    def test_status_detail_endpoint_returns_current_status_and_timeline(self):
+        sos = SOS.objects.create(user=self.resident_user, message="Need help", location="Block 5", category="medical")
+        sos.record_status_event("GUARDIAN_NOTIFIED", details="Guardian notified")
+        sos.record_status_event("SECURITY_RESPONDED", details="Security responded")
+
+        self.client.force_authenticate(user=self.admin_user)
+        response = self.client.get(f"/api/sos/{sos.id}/status/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["current_status"], "SECURITY_RESPONDED")
+        self.assertEqual(len(response.data["timeline"]), 2)
+        self.assertIn("occurred_at", response.data["timeline"][0])
+
+    def test_resident_can_only_view_their_own_status(self):
+        other_sos = SOS.objects.create(user=self.other_resident, message="Other", location="Block 2", category="fire")
+        self.client.force_authenticate(user=self.resident_user)
+
+        response = self.client.get(f"/api/sos/{other_sos.id}/status/")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_status_list_supports_search_filter_ordering_and_pagination(self):
+        society = "Lakeview"
+        first_sos = SOS.objects.create(user=self.resident_user, message="Need help", location="Block 1", category="medical")
+        first_sos.record_status_event("TRIGGERED")
+        first_sos.record_status_event("GUARDIAN_NOTIFIED")
+
+        second_sos = SOS.objects.create(user=self.other_resident, message="Second incident", location="Block 2", category="fire")
+        second_sos.record_status_event("TRIGGERED")
+
+        self.client.force_authenticate(user=self.admin_user)
+        response = self.client.get(
+            "/api/sos/status-list/?search=incident&status=TRIGGERED&ordering=-created_at&page=1&page_size=1"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 2)
+        self.assertEqual(len(response.data["results"]), 1)
+        self.assertEqual(response.data["results"][0]["incident_id"], second_sos.id)
+
+
+class SOSResponseMonitoringTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user_model = get_user_model()
+        self.admin_user = self.user_model.objects.create_user(
+            username="admin_monitor",
+            email="admin_monitor@example.com",
+            password="testpass123",
+            role="ADMIN",
+        )
+        self.resident_user = self.user_model.objects.create_user(
+            username="resident_monitor",
+            email="resident_monitor@example.com",
+            password="testpass123",
+            role="RESIDENT",
+        )
+        self.other_resident = self.user_model.objects.create_user(
+            username="resident_other_monitor",
+            email="resident_other_monitor@example.com",
+            password="testpass123",
+            role="RESIDENT",
+        )
+
+    def test_response_monitoring_calculates_durations_and_stage(self):
+        base_time = timezone.now() - timedelta(hours=2)
+        sos = SOS.objects.create(user=self.resident_user, message="Need help", location="Block 5", category="medical")
+        sos.created_at = base_time
+        sos.save(update_fields=["created_at"])
+
+        sos.record_status_event("TRIGGERED", details="Triggered", occurred_at=base_time)
+        sos.record_status_event("GUARDIAN_RESPONDED", details="Guardian responded", occurred_at=base_time + timedelta(minutes=10))
+        sos.record_status_event("VOLUNTEER_ACCEPTED", details="Volunteer accepted", occurred_at=base_time + timedelta(minutes=20))
+        sos.record_status_event("SECURITY_RESPONDED", details="Security responded", occurred_at=base_time + timedelta(minutes=30))
+        sos.record_status_event("INCIDENT_CLOSED", details="Closed", occurred_at=base_time + timedelta(minutes=40))
+
+        self.client.force_authenticate(user=self.admin_user)
+        response = self.client.get(f"/api/sos/response-monitor/{sos.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["current_stage"], "Closed")
+        self.assertEqual(response.data["response_durations"]["guardian_response_time_seconds"], 600)
+        self.assertEqual(response.data["response_durations"]["volunteer_response_time_seconds"], 1200)
+        self.assertEqual(response.data["response_durations"]["security_response_time_seconds"], 1800)
+        self.assertEqual(response.data["response_durations"]["total_resolution_time_seconds"], 2400)
+
+    def test_response_monitoring_lists_active_and_closed_incidents_with_filters(self):
+        base_time = timezone.now() - timedelta(hours=2)
+        active_sos = SOS.objects.create(user=self.resident_user, message="Active incident", location="Block 1", category="medical")
+        active_sos.created_at = base_time
+        active_sos.save(update_fields=["created_at"])
+        active_sos.record_status_event("TRIGGERED", occurred_at=base_time)
+        active_sos.record_status_event("GUARDIAN_NOTIFIED", occurred_at=base_time + timedelta(minutes=5))
+
+        closed_sos = SOS.objects.create(user=self.other_resident, message="Closed incident", location="Block 2", category="fire")
+        closed_sos.created_at = base_time
+        closed_sos.save(update_fields=["created_at"])
+        closed_sos.record_status_event("TRIGGERED", occurred_at=base_time)
+        closed_sos.record_status_event("INCIDENT_CLOSED", occurred_at=base_time + timedelta(minutes=15))
+
+        self.client.force_authenticate(user=self.admin_user)
+        response = self.client.get(
+            "/api/sos/response-monitor/?current_stage=Waiting%20for%20Guardian&active=true&ordering=-created_at&page=1&page_size=1"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(len(response.data["results"]), 1)
+        self.assertEqual(response.data["results"][0]["incident_id"], active_sos.id)
+
+    def test_response_monitoring_respects_resident_permissions(self):
+        sos = SOS.objects.create(user=self.other_resident, message="Other incident", location="Block 3", category="security")
+        self.client.force_authenticate(user=self.resident_user)
+
+        response = self.client.get(f"/api/sos/response-monitor/{sos.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_response_monitoring_supports_search_filter_and_pagination(self):
+        base_time = timezone.now() - timedelta(hours=1)
+        sos = SOS.objects.create(user=self.resident_user, message="Searchable incident", location="Block 9", category="medical")
+        sos.created_at = base_time
+        sos.save(update_fields=["created_at"])
+        sos.record_status_event("TRIGGERED", occurred_at=base_time)
+        sos.record_status_event("GUARDIAN_NOTIFIED", occurred_at=base_time + timedelta(minutes=3))
+
+        self.client.force_authenticate(user=self.admin_user)
+        response = self.client.get(
+            "/api/sos/response-monitor/?search=searchable&incident_type=medical&ordering=-created_at&page=1&page_size=1"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["incident_id"], sos.id)
+
+
+class SOSDashboardAggregationTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user_model = get_user_model()
+        self.admin_user = self.user_model.objects.create_user(
+            username="admin_dashboard",
+            email="admin_dashboard@example.com",
+            password="testpass123",
+            role="ADMIN",
+        )
+        self.resident_user = self.user_model.objects.create_user(
+            username="resident_dashboard",
+            email="resident_dashboard@example.com",
+            password="testpass123",
+            role="RESIDENT",
+        )
+        self.society = Society.objects.create(
+            name="Lakeview Society",
+            address="1 Main Road",
+            city="Bengaluru",
+            state="KA",
+            pincode="560001",
+        )
+
+    def test_dashboard_overview_returns_empty_state_when_no_data(self):
+        self.client.force_authenticate(user=self.admin_user)
+        response = self.client.get("/api/sos/dashboard/overview/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["overview"]["total_incidents"], 0)
+        self.assertEqual(response.data["overview"]["active_incidents"], 0)
+        self.assertEqual(response.data["overview"]["resolved_incidents"], 0)
+        self.assertEqual(response.data["overview"]["pending_notifications"], 0)
+        self.assertEqual(response.data["overview"]["failed_deliveries"], 0)
+        self.assertEqual(response.data["overview"]["active_societies"], 0)
+
+    def test_dashboard_overview_aggregates_incidents_and_notifications(self):
+        ResidentProfile.objects.create(user=self.resident_user, society=self.society, block=None, flat=None)
+
+        active_sos = SOS.objects.create(user=self.resident_user, message="Active alert", location="Block 1", category="medical")
+        active_sos.record_status_event("TRIGGERED")
+        active_sos.record_status_event("GUARDIAN_NOTIFIED")
+
+        resolved_sos = SOS.objects.create(user=self.resident_user, message="Resolved alert", location="Block 2", category="fire")
+        resolved_sos.record_status_event("TRIGGERED")
+        resolved_sos.record_status_event("INCIDENT_CLOSED")
+
+        notification = Notification.objects.create(user=self.resident_user, title="Test alert", body="Need attention", kind="SOS", read=False)
+        NotificationDelivery.objects.create(notification=notification, channel="Email", recipient="admin@example.com", status="Sent")
+        NotificationDelivery.objects.create(notification=notification, channel="SMS", recipient="+919999999999", status="Failed")
+
+        self.client.force_authenticate(user=self.admin_user)
+        response = self.client.get("/api/sos/dashboard/overview/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["overview"]["total_incidents"], 2)
+        self.assertEqual(response.data["overview"]["active_incidents"], 1)
+        self.assertEqual(response.data["overview"]["resolved_incidents"], 1)
+        self.assertEqual(response.data["overview"]["pending_notifications"], 1)
+        self.assertEqual(response.data["overview"]["failed_deliveries"], 1)
+        self.assertEqual(response.data["overview"]["active_societies"], 1)
+
+    def test_dashboard_recent_activity_supports_pagination(self):
+        first_sos = SOS.objects.create(user=self.resident_user, message="First alert", location="Block 1", category="medical")
+        first_sos.record_status_event("TRIGGERED")
+        second_sos = SOS.objects.create(user=self.resident_user, message="Second alert", location="Block 2", category="fire")
+        second_sos.record_status_event("TRIGGERED")
+
+        self.client.force_authenticate(user=self.admin_user)
+        response = self.client.get("/api/sos/dashboard/recent-activity/?page=1&page_size=1")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 2)
+        self.assertEqual(len(response.data["results"]), 1)
+        self.assertEqual(response.data["results"][0]["type"], "SOS")
+
+    def test_dashboard_requires_admin_access(self):
+        self.client.force_authenticate(user=self.resident_user)
+        response = self.client.get("/api/sos/dashboard/overview/")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
 
 class SOSCategoryFlowTests(TestCase):

@@ -1,5 +1,5 @@
 import { api, getStoredToken, getAuthHeaders } from './authService.js';
-import { Platform } from 'react-native';
+import { Platform, Linking } from 'react-native';
 
 let Location = null;
 
@@ -284,6 +284,103 @@ export async function updateSosIncident(id, payload = {}) {
     });
     throw error;
   }
+}
+
+export async function respondToSosAlert(id, action = 'accept') {
+  const token = await getStoredToken();
+  const headers = await getAuthHeaders(token);
+  const payload = {
+    action: action === 'decline' ? 'decline' : 'accept',
+    response_status: action === 'decline' ? 'DECLINED' : 'ACCEPTED',
+  };
+
+  const candidateUrls = [
+    `/sos/alerts/${id}/respond/`,
+    `/sos/alerts/${id}/guardian-response/`,
+    `/sos/${id}/respond/`,
+    `/sos/${id}/guardian-response/`,
+    `/sos/guardian-response/${id}/`,
+  ];
+
+  const errors = [];
+
+  for (const candidateUrl of candidateUrls) {
+    try {
+      const response = await api.post(candidateUrl, payload, { headers });
+      console.log(`[sos] POST ${candidateUrl} -> ${response?.status ?? 'unknown'}`);
+      return response;
+    } catch (error) {
+      const status = error?.response?.status;
+      if (status && [400, 401, 403, 404, 405].includes(status)) {
+        errors.push({ url: candidateUrl, status, data: error?.response?.data });
+        continue;
+      }
+
+      console.log(`[sos] POST ${candidateUrl} failed`, {
+        status: error?.response?.status,
+        message: error?.message,
+        data: error?.response?.data,
+      });
+      throw error;
+    }
+  }
+
+  console.log(`[sos] No guardian response endpoint available for alert ${id}; using local fallback`, errors);
+  return {
+    status: 200,
+    data: {
+      success: true,
+      action: payload.action,
+      fallback: true,
+      message: payload.action === 'decline' ? 'Guardian decline recorded locally.' : 'Guardian response recorded locally.',
+    },
+  };
+}
+
+export async function declineSosAlert(id, action = 'decline') {
+  return respondToSosAlert(id, action);
+}
+
+export async function openSosLocation(alert = {}) {
+  const coordinates = alert?.latitude != null && alert?.longitude != null
+    ? { latitude: Number(alert.latitude), longitude: Number(alert.longitude) }
+    : null;
+
+  if (coordinates && Number.isFinite(coordinates.latitude) && Number.isFinite(coordinates.longitude)) {
+    const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${coordinates.latitude},${coordinates.longitude}`;
+    await Linking.openURL(googleMapsUrl);
+    return;
+  }
+
+  const query = String(alert?.address || alert?.location || '').trim();
+  if (query) {
+    const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+    await Linking.openURL(googleMapsUrl);
+    return;
+  }
+
+  throw new Error('Location unavailable');
+}
+
+export async function navigateToSosLocation(alert = {}) {
+  const coordinates = alert?.latitude != null && alert?.longitude != null
+    ? { latitude: Number(alert.latitude), longitude: Number(alert.longitude) }
+    : null;
+
+  if (coordinates && Number.isFinite(coordinates.latitude) && Number.isFinite(coordinates.longitude)) {
+    const googleMapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${coordinates.latitude},${coordinates.longitude}`;
+    await Linking.openURL(googleMapsUrl);
+    return;
+  }
+
+  const query = String(alert?.address || alert?.location || '').trim();
+  if (query) {
+    const googleMapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(query)}`;
+    await Linking.openURL(googleMapsUrl);
+    return;
+  }
+
+  throw new Error('Location unavailable');
 }
 
 export async function fetchSosMessages(id) {

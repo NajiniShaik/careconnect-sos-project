@@ -4,6 +4,7 @@ import { View, Text, StyleSheet, VirtualizedList, RefreshControl, Pressable, Mod
 
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { AppScreen, PageHeader, AppButton, appColors, AppIcon } from "../../components/common/designSystem";
+import { getStoredUser } from "../../services/authService";
 import {
   fetchNotificationsFromBackend,
   subscribeToNotificationUpdates,
@@ -53,8 +54,8 @@ export default function NotificationsRoute() {
   const [items, setItems] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
   const [activeFilter, setActiveFilter] = useState("all");
-  const [selectedNotificationId, setSelectedNotificationId] = useState(null);
   const [showPermissionModal, setShowPermissionModal] = useState(false);
+  const [userRole, setUserRole] = useState(null);
   const [permissionFlowStep, setPermissionFlowStep] = useState("request");
   const listRef = useRef(null);
 
@@ -63,9 +64,7 @@ export default function NotificationsRoute() {
     setItems(Array.isArray(list) ? list : []);
   }, []);
 
-  useEffect(() => {
-    setSelectedNotificationId(params?.selectedId ? String(params.selectedId) : null);
-  }, [params?.selectedId]);
+  const selectedNotificationId = params?.selectedId ? String(params.selectedId) : null;
 
   useEffect(() => {
     if (!selectedNotificationId || !listRef.current || items.length === 0) return;
@@ -90,6 +89,10 @@ export default function NotificationsRoute() {
 
     (async () => {
       if (!mounted) return;
+      const currentUser = await getStoredUser();
+      if (mounted) {
+        setUserRole(currentUser?.role || null);
+      }
       const status = await getNotificationPermissionStatus();
       setPermissionFlowStep("request");
       if (status !== "granted" && status !== "denied" && status !== "expo_go") {
@@ -110,6 +113,7 @@ export default function NotificationsRoute() {
   };
 
   const unreadCount = items.filter((i) => !i.read).length;
+  const isVolunteer = String(userRole || "").toUpperCase() === "VOLUNTEER";
 
   const filteredItems = useMemo(() => {
     if (activeFilter === "all") return items;
@@ -177,8 +181,11 @@ export default function NotificationsRoute() {
         onPress={() => {
           if (item.data?.target) {
             router.push(item.data.target);
+          } else if (item.data?.type === "COMMUNITY_BROADCAST" || item.data?.broadcast === true) {
+            router.push("/volunteer-incidents");
+          } else if (item.data?.type === "SECURITY_ALERT" || item.kind === "SECURITY_ALERT") {
+            router.push(`/security-incidents?notificationId=${encodeURIComponent(String(item.id || ""))}`);
           }
-          handleMarkRead(item.id);
         }}
         style={[styles.card, !item.read && styles.unreadCard, isSelected && styles.selectedCard]}
       >
@@ -253,6 +260,7 @@ export default function NotificationsRoute() {
         eyebrow="Notifications"
         title="Notification center"
         subtitle="Stay informed about alerts, announcements, and society updates."
+        action={isVolunteer ? <AppButton title="Volunteer incidents" onPress={() => router.push("/volunteer-incidents")} variant="secondary" style={styles.inlineButton} /> : undefined}
       />
 
       <VirtualizedList
@@ -297,6 +305,7 @@ export default function NotificationsRoute() {
 const styles = StyleSheet.create({
   listContent: { paddingBottom: 32 },
   listFooter: { height: 16 },
+  inlineButton: { minHeight: 36, paddingHorizontal: 12, paddingVertical: 8 },
   filterRow: { flexDirection: "row", gap: 10, marginBottom: 16, flexWrap: "wrap" },
   filterPill: { borderRadius: 999, paddingVertical: 10, paddingHorizontal: 16, borderWidth: 1 },
   filterPillActive: { borderColor: appColors.blue, backgroundColor: appColors.blueSoft },

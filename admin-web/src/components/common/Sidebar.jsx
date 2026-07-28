@@ -1,7 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
 
-const role = (localStorage.getItem("role") || "").toUpperCase();
-
 const menuItems = [
   { name: "Dashboard", path: "/dashboard" },
   { name: "Society", path: "/societies" },
@@ -16,6 +14,14 @@ const menuItems = [
     children: [
       { name: "Logs", path: "/notifications/logs" },
       { name: "Templates", path: "/notifications/templates" },
+    ],
+  },
+  {
+    name: "Escalation",
+    path: "/guardian-escalation",
+    children: [
+      { name: "Settings", path: "/guardian-escalation" },
+      { name: "Logs", path: "/escalation-logs" },
     ],
   },
 ];

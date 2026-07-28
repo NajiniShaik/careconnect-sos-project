@@ -13,6 +13,7 @@ from .views import (
     SecurityRegisterView,
     VerifyOTPView,
     EmergencyContactViewSet,
+    VolunteerAvailabilityView,
     )
 
 router = DefaultRouter()
@@ -41,6 +42,7 @@ urlpatterns = [
     
     path("login/", LoginView.as_view()),
     path("logout/", LogoutView.as_view(), name="logout"),
+    path("volunteers/availability/", VolunteerAvailabilityView.as_view(), name="volunteer-availability"),
 
     path("", include(router.urls)),
 ]

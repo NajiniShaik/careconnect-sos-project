@@ -3,25 +3,105 @@ import re
 from typing import List
 
 from django.conf import settings
-from django.db import transaction
+from django.db import models, transaction
 from django.shortcuts import render
 from django.contrib.auth import get_user_model
-from rest_framework import status
+from django.core.paginator import Paginator
+from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework import status, viewsets
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.filters import SearchFilter
+from rest_framework.pagination import PageNumberPagination
 
-from .serializers import SOSSerializer, SOSStatusUpdateSerializer, SOSResidentUpdateSerializer, SOSMessageCreateSerializer, SOSMessageSerializer, SpeechToTextSerializer
-from .models import SOS, SOSMessage
+from .serializers import (
+    SOSSerializer,
+    SOSStatusUpdateSerializer,
+    SOSResidentUpdateSerializer,
+    SOSMessageCreateSerializer,
+    SOSMessageSerializer,
+    SpeechToTextSerializer,
+    SOSStatusDetailSerializer,
+    SOSStatusListItemSerializer,
+    SOSResponseMonitoringSerializer,
+)
+from .models import SOS, SOSMessage, SOSStatusEvent
 from . import transcription as transcription_module
 from .transcription import enqueue_transcription
 from .utils import reverse_geocode_coordinates
 from users.permissions import IsAdmin, IsResident, IsSecurity
-from notifications.models import DeviceToken, Notification
+from notifications.models import DeviceToken, Notification, NotificationDelivery
 from notifications.tasks import send_push_notification_task, send_email_notification_task, send_sms_notification_task
+from society.models import Society
 
 logger = logging.getLogger(__name__)
+
+
+class DashboardPagination(PageNumberPagination):
+    page_size = 10
+    page_size_query_param = "page_size"
+    max_page_size = 100
+
+
+class DashboardOverviewView(APIView):
+    permission_classes = [IsAuthenticated, IsAdmin]
+
+    def get(self, request):
+        sos_queryset = SOS.objects.select_related("user").all()
+
+        active_incidents = 0
+        resolved_incidents = 0
+        for sos in sos_queryset:
+            current_status = sos.get_current_lifecycle_status()
+            if current_status == "INCIDENT_CLOSED" or str(getattr(sos, "status", "")).upper() == "RESOLVED":
+                resolved_incidents += 1
+            else:
+                active_incidents += 1
+
+        active_societies = (
+            sos_queryset.filter(user__resident_profile__society__isnull=False)
+            .values_list("user__resident_profile__society__id", flat=True)
+            .distinct()
+            .count()
+        )
+
+        overview = {
+            "total_incidents": sos_queryset.count(),
+            "active_incidents": active_incidents,
+            "resolved_incidents": resolved_incidents,
+            "pending_notifications": Notification.objects.filter(read=False).count(),
+            "failed_deliveries": NotificationDelivery.objects.filter(status="Failed").count(),
+            "active_societies": active_societies,
+        }
+        return Response({"overview": overview}, status=status.HTTP_200_OK)
+
+
+class DashboardRecentActivityView(APIView):
+    permission_classes = [IsAuthenticated, IsAdmin]
+    pagination_class = DashboardPagination
+
+    def get(self, request):
+        activities = []
+        for sos in SOS.objects.select_related("user").order_by("-created_at", "-id"):
+            current_status = sos.get_current_lifecycle_status()
+            status_label = "Resolved" if current_status == "INCIDENT_CLOSED" else "Active"
+            activities.append(
+                {
+                    "id": sos.id,
+                    "type": "SOS",
+                    "title": "SOS Incident",
+                    "description": sos.message or "SOS alert triggered",
+                    "actor": getattr(sos.user, "username", None),
+                    "status": status_label,
+                    "created_at": sos.created_at.isoformat() if getattr(sos, "created_at", None) else None,
+                }
+            )
+
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(activities, request, view=self)
+        return paginator.get_paginated_response(page)
 
 
 def _normalize_phone_number(phone_number):
@@ -189,6 +269,7 @@ class CreateSOSView(APIView):
             status="OPEN",
             priority=normalized_priority,
         )
+        sos.record_status_event("TRIGGERED", details="SOS incident triggered")
 
         # Trigger notifications (best-effort). Do not let notification
         # failures affect the core SOS creation flow.
@@ -536,6 +617,182 @@ class AudioTranscriptionView(APIView):
 
 
 
+class ResponseMonitoringListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if request.user.role == "RESIDENT":
+            queryset = SOS.objects.filter(user=request.user)
+        elif request.user.role in ["ADMIN", "SECURITY"]:
+            queryset = SOS.objects.all()
+        else:
+            queryset = SOS.objects.filter(user=request.user)
+
+        search_query = request.query_params.get("search", "")
+        if search_query:
+            queryset = queryset.filter(
+                models.Q(id__icontains=search_query) |
+                models.Q(message__icontains=search_query) |
+                models.Q(location__icontains=search_query) |
+                models.Q(category__icontains=search_query) |
+                models.Q(user__username__icontains=search_query) |
+                models.Q(user__email__icontains=search_query)
+            )
+
+        society = request.query_params.get("society", "")
+        if society:
+            queryset = queryset.filter(user__resident_profile__society__name__icontains=society)
+
+        resident = request.query_params.get("resident", "")
+        if resident:
+            queryset = queryset.filter(
+                models.Q(user__username__icontains=resident) |
+                models.Q(user__email__icontains=resident) |
+                models.Q(user_id__icontains=resident)
+            )
+
+        incident_type = request.query_params.get("incident_type", "")
+        if incident_type:
+            queryset = queryset.filter(category__icontains=incident_type)
+
+        current_stage = request.query_params.get("current_stage", "")
+        if current_stage:
+            current_stage_value = current_stage.strip().lower()
+            if current_stage_value == "active":
+                queryset = queryset.filter(status__in=["OPEN", "ACTIVE", "IN_PROGRESS"]).exclude(status_events__status="INCIDENT_CLOSED")
+            elif current_stage_value == "closed":
+                queryset = queryset.filter(status_events__status="INCIDENT_CLOSED")
+            else:
+                stage_map = {
+                    "waiting for guardian": "GUARDIAN_NOTIFIED",
+                    "waiting for volunteer": "VOLUNTEER_NOTIFIED",
+                    "waiting for security": "SECURITY_NOTIFIED",
+                    "escalated": "AUTO_ESCALATED",
+                    "active": "TRIGGERED",
+                }
+                status_value = stage_map.get(current_stage_value)
+                if status_value:
+                    queryset = queryset.filter(status_events__status=status_value).distinct()
+
+        active_filter = request.query_params.get("active", "")
+        if active_filter:
+            active_value = str(active_filter).lower() in {"1", "true", "yes", "on"}
+            if active_value:
+                queryset = queryset.exclude(status_events__status="INCIDENT_CLOSED")
+            else:
+                queryset = queryset.filter(status_events__status="INCIDENT_CLOSED")
+
+        date_from = request.query_params.get("date_from") or request.query_params.get("start_date")
+        if date_from:
+            queryset = queryset.filter(created_at__date__gte=date_from)
+
+        date_to = request.query_params.get("date_to") or request.query_params.get("end_date")
+        if date_to:
+            queryset = queryset.filter(created_at__date__lte=date_to)
+
+        ordering = request.query_params.get("ordering", "-created_at")
+        if ordering not in ["created_at", "-created_at", "updated_at", "-updated_at"]:
+            ordering = "-created_at"
+        queryset = queryset.order_by(ordering)
+
+        page_size = int(request.query_params.get("page_size") or 10)
+        page_number = int(request.query_params.get("page") or 1)
+        paginator = Paginator(queryset.distinct(), page_size)
+        page = paginator.get_page(page_number)
+        serializer = SOSResponseMonitoringSerializer(page.object_list, many=True, context={"request": request})
+        return Response({
+            "count": paginator.count,
+            "page": page.number,
+            "page_size": page_size,
+            "results": serializer.data,
+        }, status=status.HTTP_200_OK)
+
+
+class ResponseMonitoringDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        try:
+            sos = SOS.objects.get(pk=pk)
+        except SOS.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        if request.user.role == "RESIDENT" and sos.user_id != request.user.id:
+            return Response(status=status.HTTP_403_FORBIDDEN)
+
+        if request.user.role not in ["ADMIN", "SECURITY", "RESIDENT"]:
+            return Response(status=status.HTTP_403_FORBIDDEN)
+
+        serializer = SOSResponseMonitoringSerializer(sos, context={"request": request})
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class SOSStatusTrackingView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        try:
+            sos = SOS.objects.get(pk=pk)
+        except SOS.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        if request.user.role == "RESIDENT" and sos.user_id != request.user.id:
+            return Response(status=status.HTTP_403_FORBIDDEN)
+
+        if request.user.role not in ["ADMIN", "SECURITY", "RESIDENT"]:
+            return Response(status=status.HTTP_403_FORBIDDEN)
+
+        serializer = SOSStatusDetailSerializer(sos, context={"request": request})
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class SOSStatusListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if request.user.role == "RESIDENT":
+            queryset = SOS.objects.filter(user=request.user)
+        elif request.user.role in ["ADMIN", "SECURITY"]:
+            queryset = SOS.objects.all()
+        else:
+            queryset = SOS.objects.filter(user=request.user)
+
+        status_filter = request.query_params.get("status")
+        if status_filter:
+            queryset = queryset.filter(status_events__status=status_filter.upper()).distinct()
+
+        count_queryset = queryset
+
+        search_query = request.query_params.get("search", "")
+        if search_query:
+            queryset = queryset.filter(
+                models.Q(id__icontains=search_query) |
+                models.Q(message__icontains=search_query) |
+                models.Q(location__icontains=search_query) |
+                models.Q(category__icontains=search_query) |
+                models.Q(user__username__icontains=search_query) |
+                models.Q(user__email__icontains=search_query)
+            )
+
+        ordering = request.query_params.get("ordering", "-created_at")
+        if ordering not in ["created_at", "-created_at", "updated_at", "-updated_at"]:
+            ordering = "-created_at"
+        queryset = queryset.order_by(ordering)
+
+        page_size = int(request.query_params.get("page_size") or 10)
+        page_number = int(request.query_params.get("page") or 1)
+        paginator = Paginator(queryset, page_size)
+        page = paginator.get_page(page_number)
+
+        serializer = SOSStatusListItemSerializer(page.object_list, many=True, context={"request": request})
+        return Response({
+            "count": count_queryset.count(),
+            "page": page.number,
+            "page_size": page_size,
+            "results": serializer.data,
+        }, status=status.HTTP_200_OK)
+
+
 class SOSAlertManagementView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -563,6 +820,12 @@ class SOSAlertManagementView(APIView):
             serializer = SOSStatusUpdateSerializer(sos, data=request.data, partial=True)
             if serializer.is_valid():
                 serializer.save()
+                if "status" in request.data:
+                    normalized_status = str(request.data.get("status", "")).upper()
+                    if normalized_status in {"RESOLVED", "CLOSED"}:
+                        sos.record_status_event("INCIDENT_CLOSED", details="Incident closed")
+                    elif normalized_status in {"IN_PROGRESS", "ACTIVE", "ESCALATED"}:
+                        sos.record_status_event("SECURITY_RESPONDED", details="Security responded")
                 return Response(SOSSerializer(sos, context={"request": request}).data, status=status.HTTP_200_OK)
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 

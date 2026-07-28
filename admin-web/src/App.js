@@ -11,6 +11,8 @@ import ResidentManagement from "./pages/ResidentManagement";
 import EmergencyContactManagement from "./pages/EmergencyContactManagement";
 import AlertsManagement from "./pages/AlertsManagement";
 import Notifications from "./pages/Notifications";
+import GuardianEscalationSettings from "./pages/GuardianEscalationSettings";
+import EscalationLogs from "./pages/EscalationLogs";
 
 function App() {
   const token = localStorage.getItem("access");
@@ -90,6 +92,24 @@ function App() {
         element={
           <ProtectedRoute>
             <Notifications />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/guardian-escalation"
+        element={
+          <ProtectedRoute>
+            <GuardianEscalationSettings />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/escalation-logs"
+        element={
+          <ProtectedRoute>
+            <EscalationLogs />
           </ProtectedRoute>
         }
       />

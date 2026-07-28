@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from django.utils import timezone
 from .models import (
     User,
     ResidentProfile,
@@ -249,6 +250,51 @@ class SecurityRegisterSerializer(serializers.Serializer):
         )
 
         return user
+
+class VolunteerAvailabilitySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = VolunteerProfile
+        fields = (
+            "is_available",
+            "availability_updated_at",
+            "last_known_latitude",
+            "last_known_longitude",
+        )
+        read_only_fields = ("availability_updated_at",)
+
+    def validate_last_known_latitude(self, value):
+        if value is None:
+            return value
+        if value < -90 or value > 90:
+            raise serializers.ValidationError("Latitude must be between -90 and 90")
+        return value
+
+    def validate_last_known_longitude(self, value):
+        if value is None:
+            return value
+        if value < -180 or value > 180:
+            raise serializers.ValidationError("Longitude must be between -180 and 180")
+        return value
+
+    def validate(self, attrs):
+        latitude = attrs.get("last_known_latitude")
+        longitude = attrs.get("last_known_longitude")
+        if latitude is None and longitude is None:
+            return attrs
+        if latitude is None or longitude is None:
+            raise serializers.ValidationError("Both latitude and longitude must be provided together")
+        return attrs
+
+    def update(self, instance, validated_data):
+        instance.is_available = validated_data.get("is_available", instance.is_available)
+        if "last_known_latitude" in validated_data:
+            instance.last_known_latitude = validated_data.get("last_known_latitude")
+        if "last_known_longitude" in validated_data:
+            instance.last_known_longitude = validated_data.get("last_known_longitude")
+        instance.availability_updated_at = timezone.now()
+        instance.save(update_fields=["is_available", "last_known_latitude", "last_known_longitude", "availability_updated_at"])
+        return instance
+
 
 class EmergencyContactSerializer(serializers.ModelSerializer):
     

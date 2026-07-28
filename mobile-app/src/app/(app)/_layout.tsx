@@ -60,6 +60,8 @@ export default function AppLayout() {
         const trimmedAlertId = data?.alert_id || data?.alertId || data?.alertid || null;
         const target =
           data?.target ||
+          (data?.type === "COMMUNITY_BROADCAST" || data?.broadcast === true ? "/volunteer-incidents" : null) ||
+          (data?.type === "SECURITY_ALERT" ? "/security-incidents" : null) ||
           (data?.type === "SOS" && trimmedAlertId ? `/alerts?alert_id=${trimmedAlertId}` : null) ||
           "/notifications";
 
@@ -220,6 +222,12 @@ export default function AppLayout() {
         options={{
           title: "Settings",
           tabBarIcon: ({ color }) => <AppIcon name="settings-outline" size={18} color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="volunteer-incidents"
+        options={{
+          href: null,
         }}
       />
     </Tabs>

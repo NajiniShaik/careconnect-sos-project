@@ -87,6 +87,10 @@ class VolunteerProfile(models.Model):
     )
     skills = models.CharField(max_length=255)
     availability = models.CharField(max_length=100)
+    is_available = models.BooleanField(default=False)
+    availability_updated_at = models.DateTimeField(blank=True, null=True)
+    last_known_latitude = models.FloatField(blank=True, null=True)
+    last_known_longitude = models.FloatField(blank=True, null=True)
 
     def __str__(self):
         return self.user.username
