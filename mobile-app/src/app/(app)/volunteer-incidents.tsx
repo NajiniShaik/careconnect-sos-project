@@ -4,7 +4,7 @@ import { useRouter } from "expo-router";
 import { AppButton, AppScreen, EmptyState, PageHeader, SectionCard, StatusBadge, appColors } from "../../components/common/designSystem";
 import { api, getAuthHeaders, getStoredUser } from "../../services/authService";
 
-const AVAILABILITY_ENDPOINT = "/api/users/volunteers/availability/";
+const AVAILABILITY_ENDPOINT = "/volunteers/availability/";
 
 function formatRelativeTime(value) {
   if (!value) return "Unknown";
@@ -196,6 +196,20 @@ export default function VolunteerIncidentsRoute() {
   };
 
   const isVolunteer = useMemo(() => String(userRole || "").toUpperCase() === "VOLUNTEER", [userRole]);
+
+  // Access guard: show access denied if user role is known and not VOLUNTEER
+  if (userRole && !isVolunteer) {
+    return (
+      <AppScreen>
+        <EmptyState
+          title="Access denied"
+          message="Volunteer incidents are available to volunteers only."
+          icon="shield-outline"
+          action={<AppButton title="Return to notifications" onPress={() => router.push("/notifications")} variant="secondary" />}
+        />
+      </AppScreen>
+    );
+  }
 
   return (
     <AppScreen>

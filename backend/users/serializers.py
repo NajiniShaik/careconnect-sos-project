@@ -43,6 +43,7 @@ class ResidentRegisterSerializer(serializers.Serializer):
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True)
     phone = serializers.CharField()
+    role = serializers.CharField(required=False, write_only=True)
 
     society = serializers.PrimaryKeyRelatedField(
         queryset=Society.objects.all()
@@ -127,6 +128,7 @@ class GuardianRegisterSerializer(serializers.Serializer):
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True)
     phone = serializers.CharField()
+    role = serializers.CharField(required=False, write_only=True)
 
     resident_name = serializers.CharField()
     relationship = serializers.CharField()
@@ -174,7 +176,11 @@ class VolunteerRegisterSerializer(serializers.Serializer):
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True)
     phone = serializers.CharField()
+    role = serializers.CharField(required=False, write_only=True)
 
+    society = serializers.PrimaryKeyRelatedField(
+        queryset=Society.objects.all()
+    )
     skills = serializers.CharField()
     availability = serializers.CharField()
 
@@ -204,6 +210,7 @@ class VolunteerRegisterSerializer(serializers.Serializer):
 
         VolunteerProfile.objects.create(
             user=user,
+            society=validated_data["society"],
             skills=validated_data["skills"],
             availability=validated_data["availability"],
         )
@@ -215,7 +222,11 @@ class SecurityRegisterSerializer(serializers.Serializer):
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True)
     phone = serializers.CharField()
+    role = serializers.CharField(required=False, write_only=True)
 
+    society = serializers.PrimaryKeyRelatedField(
+        queryset=Society.objects.all()
+    )
     employee_id = serializers.CharField()
     shift = serializers.CharField()
 
@@ -245,6 +256,7 @@ class SecurityRegisterSerializer(serializers.Serializer):
 
         SecurityProfile.objects.create(
             user=user,
+            society=validated_data["society"],
             employee_id=validated_data["employee_id"],
             shift=validated_data["shift"],
         )

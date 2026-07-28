@@ -33,7 +33,7 @@ from .transcription import enqueue_transcription
 from .utils import reverse_geocode_coordinates
 from users.permissions import IsAdmin, IsResident, IsSecurity
 from notifications.models import DeviceToken, Notification, NotificationDelivery
-from notifications.tasks import send_push_notification_task, send_email_notification_task, send_sms_notification_task
+from notifications.tasks import send_push_notification_task, send_email_notification_task, send_sms_notification_task, process_community_broadcast_task
 from society.models import Society
 
 logger = logging.getLogger(__name__)
@@ -434,6 +434,9 @@ class CreateSOSView(APIView):
                         f"{resident_name} has triggered an SOS.",
                         data=push_data,
                     )
+
+                # Enqueue community broadcast using the existing notifications pipeline.
+                process_community_broadcast_task.delay(sos.id, include_residents=False, broadcast_radius_meters=None)
             except Exception:
                 logger.exception("Failed to queue SOS notifications")
 

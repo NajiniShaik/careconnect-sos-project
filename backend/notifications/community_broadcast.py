@@ -2,7 +2,9 @@ import logging
 from typing import Dict, List, Optional
 
 from django.contrib.auth import get_user_model
+from django.db import models
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from django.conf import settings
@@ -94,7 +96,11 @@ class CommunityBroadcastService:
         queryset = User.objects.filter(role__in=role_preferences, is_active=True)
         if society is not None:
             try:
-                queryset = queryset.filter(resident_profile__society=society)
+                queryset = queryset.filter(
+                    Q(role="RESIDENT", resident_profile__society=society)
+                    | Q(role="VOLUNTEER", volunteer_profile__society=society)
+                    | Q(role="SECURITY", security_profile__society=society)
+                )
             except Exception:
                 queryset = queryset.filter(pk__in=[])
 

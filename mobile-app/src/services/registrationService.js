@@ -26,10 +26,12 @@ export function getRegistrationRequest(form) {
       relationship: (form.relationship || '').trim(),
     },
     VOLUNTEER: {
+      society: Number(form.society),
       skills: (form.skills || '').trim(),
       availability: (form.availability || '').trim(),
     },
     SECURITY: {
+      society: Number(form.society),
       employee_id: (form.employee_id || '').trim(),
       shift: (form.shift || '').trim(),
     },

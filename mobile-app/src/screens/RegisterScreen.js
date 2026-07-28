@@ -72,11 +72,13 @@ export default function RegisterScreen() {
     if (role === "VOLUNTEER") {
       if (!form.skills.trim()) nextErrors.skills = "Skills are required";
       if (!form.availability.trim()) nextErrors.availability = "Availability is required";
+      if (!form.society.trim()) nextErrors.society = "Society is required";
     }
 
     if (role === "SECURITY") {
       if (!form.employee_id.trim()) nextErrors.employee_id = "Employee ID is required";
       if (!form.shift.trim()) nextErrors.shift = "Shift is required";
+      if (!form.society.trim()) nextErrors.society = "Society is required";
     }
 
     if (role === "RESIDENT") {
@@ -90,20 +92,27 @@ export default function RegisterScreen() {
 
   useEffect(() => {
     const loadLookups = async () => {
-      if (role !== "RESIDENT") return;
+      const needsSociety = ["RESIDENT", "VOLUNTEER", "SECURITY"];
+      if (!needsSociety.includes(role)) return;
 
       setLoadingLookups(true);
       try {
         const token = await getStoredToken();
         const authHeaders = await getAuthHeaders(token);
-        const [societiesRes, blocksRes, flatsRes] = await Promise.all([
-          api.get("/society/societies/", { headers: authHeaders }),
-          api.get("/society/blocks/", { headers: authHeaders }),
-          api.get("/society/flats/", { headers: authHeaders }),
-        ]);
+        const societiesRes = await api.get("/society/societies/", { headers: authHeaders });
         setSocieties(societiesRes.data || []);
-        setBlocks(blocksRes.data || []);
-        setFlats(flatsRes.data || []);
+
+        if (role === "RESIDENT") {
+          const [blocksRes, flatsRes] = await Promise.all([
+            api.get("/society/blocks/", { headers: authHeaders }),
+            api.get("/society/flats/", { headers: authHeaders }),
+          ]);
+          setBlocks(blocksRes.data || []);
+          setFlats(flatsRes.data || []);
+        } else {
+          setBlocks([]);
+          setFlats([]);
+        }
       } catch (error) {
         Alert.alert("Lookup failed", getErrorMessage(error));
       } finally {
@@ -240,6 +249,17 @@ export default function RegisterScreen() {
             <View>
               <AppTextInput label="Skills" placeholder="First aid, transport, etc." value={form.skills} onChangeText={(value) => updateField("skills", value)} error={errors.skills} />
               <AppTextInput label="Availability" placeholder="Weekdays evenings" value={form.availability} onChangeText={(value) => updateField("availability", value)} error={errors.availability} />
+              <SearchableDropdown
+                label="Society"
+                placeholder="Select society"
+                value={form.society}
+                options={societies}
+                onSelect={handleSocietySelect}
+                getLabel={(item) => item.name}
+                getValue={(item) => item.id}
+                emptyText="No societies found"
+              />
+              {errors.society ? <Text style={styles.error}>{errors.society}</Text> : null}
             </View>
           )}
 
@@ -247,6 +267,17 @@ export default function RegisterScreen() {
             <View>
               <AppTextInput label="Employee ID" placeholder="Enter employee ID" value={form.employee_id} onChangeText={(value) => updateField("employee_id", value)} error={errors.employee_id} />
               <AppTextInput label="Shift" placeholder="Morning / Evening / Night" value={form.shift} onChangeText={(value) => updateField("shift", value)} error={errors.shift} />
+              <SearchableDropdown
+                label="Society"
+                placeholder="Select society"
+                value={form.society}
+                options={societies}
+                onSelect={handleSocietySelect}
+                getLabel={(item) => item.name}
+                getValue={(item) => item.id}
+                emptyText="No societies found"
+              />
+              {errors.society ? <Text style={styles.error}>{errors.society}</Text> : null}
             </View>
           )}
 

@@ -39,7 +39,7 @@ DEFAULT_FROM_EMAIL = os.getenv(
 SECRET_KEY = 'django-insecure-u1ghg#!kvtsef1q(5kitp7sdk2u1$zt^9u%&x#rw5qnao2uem*'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = False
 
 ALLOWED_HOSTS = ["127.0.0.1",
     "localhost",

@@ -224,12 +224,8 @@ export default function AppLayout() {
           tabBarIcon: ({ color }) => <AppIcon name="settings-outline" size={18} color={color} />,
         }}
       />
-      <Tabs.Screen
-        name="volunteer-incidents"
-        options={{
-          href: null,
-        }}
-      />
+      <Tabs.Screen name="security-incidents" options={{ href: null }} />
+      <Tabs.Screen name="volunteer-incidents" options={{ href: null }} />
     </Tabs>
   );
 }

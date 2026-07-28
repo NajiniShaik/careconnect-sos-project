@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { AppButton, AppScreen, EmptyState, PageHeader, SectionCard, StatusBadge, appColors } from "../../components/common/designSystem";
-import { api } from "../../services/authService";
+import { api, getStoredUser } from "../../services/authService";
 import { fetchNotificationsFromBackend } from "../../services/notificationService";
 
 function getParamValue(params, key) {
@@ -60,12 +60,29 @@ function normalizeSecurityIncident(item = {}) {
 export default function SecurityIncidentScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
+  const [userRole, setUserRole] = useState(null);
   const [incident, setIncident] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [actionFeedback, setActionFeedback] = useState("");
 
   const notificationId = useMemo(() => getParamValue(params, "notificationId") || getParamValue(params, "notification_id") || "", [params]);
+
+  useEffect(() => {
+    let mounted = true;
+    void (async () => {
+      try {
+        const user = await getStoredUser();
+        if (mounted) setUserRole((user?.role || "").toUpperCase() || null);
+      } catch {
+        if (mounted) setUserRole(null);
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const loadIncident = useCallback(async () => {
     setLoading(true);
@@ -145,6 +162,15 @@ export default function SecurityIncidentScreen() {
 
   return (
     <AppScreen>
+      {/* Access guard: only SECURITY role may view this screen */}
+      {userRole && userRole !== "SECURITY" ? (
+        <EmptyState
+          title="Access denied"
+          message="This screen is available to security personnel only."
+          icon="shield-outline"
+          action={<AppButton title="Return to notifications" onPress={() => router.push("/notifications")} variant="secondary" />}
+        />
+      ) : null}
       <PageHeader
         eyebrow="Security"
         title="Security incident alert"

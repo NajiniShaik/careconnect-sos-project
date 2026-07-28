@@ -85,6 +85,13 @@ class VolunteerProfile(models.Model):
         on_delete=models.CASCADE,
         related_name="volunteer_profile"
     )
+    society = models.ForeignKey(
+        Society,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="volunteers"
+    )
     skills = models.CharField(max_length=255)
     availability = models.CharField(max_length=100)
     is_available = models.BooleanField(default=False)
@@ -101,6 +108,13 @@ class SecurityProfile(models.Model):
         User,
         on_delete=models.CASCADE,
         related_name="security_profile"
+    )
+    society = models.ForeignKey(
+        Society,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="security_staff"
     )
     employee_id = models.CharField(max_length=50)
     shift = models.CharField(max_length=50)
