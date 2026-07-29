@@ -83,6 +83,31 @@ class SOSStatusTrackingTests(TestCase):
 
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
+    def test_sos_detail_endpoint_returns_single_incident_for_authenticated_users(self):
+        sos = SOS.objects.create(user=self.resident_user, message="Need help", location="Block 5", category="medical")
+        sos.record_status_event("TRIGGERED", details="Triggered")
+
+        self.client.force_authenticate(user=self.admin_user)
+        response = self.client.get(f"/api/sos/{sos.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["id"], sos.id)
+
+    def test_volunteer_accept_action_records_volunteer_status_event(self):
+        volunteer_user = self.user_model.objects.create_user(
+            username="volunteer_accept",
+            email="volunteer_accept@example.com",
+            password="testpass123",
+            role="VOLUNTEER",
+        )
+        sos = SOS.objects.create(user=self.resident_user, message="Need help", location="Block 6", category="medical")
+
+        self.client.force_authenticate(user=volunteer_user)
+        response = self.client.patch(f"/api/sos/{sos.id}/", {"action": "accept"}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(SOSStatusEvent.objects.filter(sos=sos, status="VOLUNTEER_ACCEPTED").exists())
+
     def test_status_list_supports_search_filter_ordering_and_pagination(self):
         society = "Lakeview"
         first_sos = SOS.objects.create(user=self.resident_user, message="Need help", location="Block 1", category="medical")

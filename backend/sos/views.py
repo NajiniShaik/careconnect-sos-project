@@ -799,7 +799,22 @@ class SOSStatusListView(APIView):
 class SOSAlertManagementView(APIView):
     permission_classes = [IsAuthenticated]
 
-    def get(self, request):
+    def get(self, request, pk=None):
+        if pk is not None:
+            try:
+                sos = SOS.objects.get(pk=pk)
+            except SOS.DoesNotExist:
+                return Response(status=status.HTTP_404_NOT_FOUND)
+
+            if request.user.role == "RESIDENT" and sos.user_id != request.user.id:
+                return Response(status=status.HTTP_403_FORBIDDEN)
+
+            if request.user.role not in ["ADMIN", "SECURITY", "VOLUNTEER", "RESIDENT"]:
+                return Response(status=status.HTTP_403_FORBIDDEN)
+
+            serializer = SOSSerializer(sos, context={"request": request})
+            return Response(serializer.data, status=status.HTTP_200_OK)
+
         if request.user.role == "RESIDENT":
             sos_list = SOS.objects.filter(user=request.user).order_by("-created_at")
         elif request.user.role in ["SECURITY", "ADMIN"]:
@@ -831,6 +846,16 @@ class SOSAlertManagementView(APIView):
                         sos.record_status_event("SECURITY_RESPONDED", details="Security responded")
                 return Response(SOSSerializer(sos, context={"request": request}).data, status=status.HTTP_200_OK)
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        if request.user.role in ["VOLUNTEER", "SECURITY"]:
+            action = str(request.data.get("action", "")).strip().lower()
+            if action == "accept":
+                if request.user.role == "VOLUNTEER":
+                    sos.record_status_event("VOLUNTEER_ACCEPTED", details="Volunteer accepted the incident")
+                else:
+                    sos.record_status_event("SECURITY_RESPONDED", details="Security responded to the incident")
+                return Response(SOSSerializer(sos, context={"request": request}).data, status=status.HTTP_200_OK)
+            return Response(status=status.HTTP_403_FORBIDDEN)
 
         if request.user.role == "RESIDENT":
             if sos.user_id != request.user.id:

@@ -99,7 +99,9 @@ class CommunityBroadcastService:
                 queryset = queryset.filter(
                     Q(role="RESIDENT", resident_profile__society=society)
                     | Q(role="VOLUNTEER", volunteer_profile__society=society)
+                    | Q(role="VOLUNTEER", resident_profile__society=society)
                     | Q(role="SECURITY", security_profile__society=society)
+                    | Q(role="SECURITY", resident_profile__society=society)
                 )
             except Exception:
                 queryset = queryset.filter(pk__in=[])

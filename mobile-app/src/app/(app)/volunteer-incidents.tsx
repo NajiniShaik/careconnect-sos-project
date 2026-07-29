@@ -1,10 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Alert, StyleSheet, Switch, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { AppButton, AppScreen, EmptyState, PageHeader, SectionCard, StatusBadge, appColors } from "../../components/common/designSystem";
-import { api, getAuthHeaders, getStoredUser } from "../../services/authService";
+import { api, getStoredUser } from "../../services/authService";
 
-const AVAILABILITY_ENDPOINT = "/volunteers/availability/";
+const AVAILABILITY_ENDPOINT = "/security/availability/";
 
 function formatRelativeTime(value) {
   if (!value) return "Unknown";
@@ -46,12 +46,18 @@ function normalizeIncident(item) {
 
 async function enrichIncidentWithSosDetails(incident) {
   if (!incident.alertId) {
-    return incident;
+    return { ...incident, accepted: false };
   }
 
   try {
-    const response = await api.get(`/sos/${incident.alertId}/`);
-    const detail = response?.data || {};
+    const [detailResponse, statusResponse] = await Promise.all([
+      api.get(`/sos/${incident.alertId}/`),
+      api.get(`/sos/${incident.alertId}/status/`).catch(() => null),
+    ]);
+    const detail = detailResponse?.data || {};
+    const statusDetail = statusResponse?.data || {};
+    const currentStatus = statusDetail?.current_status || detail?.status || incident.status;
+    const accepted = currentStatus === "VOLUNTEER_ACCEPTED" || currentStatus === "SECURITY_RESPONDED";
     const residentName = detail?.user?.username || detail?.user?.email || incident.residentName;
     const locationText = detail?.address || detail?.location || detail?.city || incident.blockFlat;
 
@@ -62,11 +68,12 @@ async function enrichIncidentWithSosDetails(incident) {
       blockFlat: locationText || incident.blockFlat,
       sosType: detail?.category || incident.sosType,
       time: detail?.created_at || incident.time,
-      status: detail?.status || incident.status,
+      status: currentStatus || incident.status,
       message: detail?.message || incident.message,
+      accepted,
     };
   } catch {
-    return incident;
+    return { ...incident, accepted: false };
   }
 }
 
@@ -78,33 +85,24 @@ export default function VolunteerIncidentsRoute() {
   const [availabilityFeedback, setAvailabilityFeedback] = useState("");
   const [incidents, setIncidents] = useState([]);
   const [loadingIncidents, setLoadingIncidents] = useState(true);
-  const [acceptedIds, setAcceptedIds] = useState([]);
   const [userRole, setUserRole] = useState(null);
 
   const loadAvailability = useCallback(async () => {
     try {
       setLoadingAvailability(true);
-      const authHeaders = await getAuthHeaders();
-      console.log("[volunteer availability] GET", {
-        url: AVAILABILITY_ENDPOINT,
-        method: "GET",
-        authorization: authHeaders.Authorization ? "Bearer [present]" : "missing",
-      });
-      const response = await api.get(AVAILABILITY_ENDPOINT);
+      const currentUser = await getStoredUser();
+      const role = String(currentUser?.role || userRole || "").toUpperCase();
+      const endpoint = role === "VOLUNTEER" ? "/volunteers/availability/" : "/security/availability/";
+      const response = await api.get(endpoint);
       setAvailability(response?.data || { is_available: false, availability_updated_at: null });
+      setAvailabilityFeedback("");
     } catch (error) {
-      console.log("[volunteer availability] GET error", {
-        status: error?.response?.status,
-        data: error?.response?.data,
-        url: AVAILABILITY_ENDPOINT,
-        method: "GET",
-      });
       const detail = error?.response?.data?.detail || error?.response?.data?.message || "Unable to load availability right now.";
       setAvailabilityFeedback(detail);
     } finally {
       setLoadingAvailability(false);
     }
-  }, []);
+  }, [userRole]);
 
   const loadIncidents = useCallback(async () => {
     try {
@@ -148,26 +146,17 @@ export default function VolunteerIncidentsRoute() {
   const handleToggleAvailability = async (nextValue) => {
     setSavingAvailability(true);
     setAvailabilityFeedback("");
+
     try {
-      const authHeaders = await getAuthHeaders();
-      console.log("[volunteer availability] PUT", {
-        url: AVAILABILITY_ENDPOINT,
-        method: "PUT",
-        payload: { is_available: nextValue },
-        authorization: authHeaders.Authorization ? "Bearer [present]" : "missing",
-      });
-      const response = await api.put(AVAILABILITY_ENDPOINT, { is_available: nextValue });
+      const currentUser = await getStoredUser();
+      const role = String(currentUser?.role || userRole || "").toUpperCase();
+      const endpoint = role === "VOLUNTEER" ? "/volunteers/availability/" : "/security/availability/";
+      const method = role === "VOLUNTEER" ? "put" : "patch";
+      const response = await api[method](endpoint, { is_available: nextValue });
       const nextAvailability = response?.data || {};
       setAvailability((current) => ({ ...current, ...nextAvailability }));
       setAvailabilityFeedback(nextValue ? "You are now online." : "You are now offline.");
     } catch (error) {
-      console.log("[volunteer availability] PUT error", {
-        status: error?.response?.status,
-        data: error?.response?.data,
-        url: AVAILABILITY_ENDPOINT,
-        method: "PUT",
-        payload: { is_available: nextValue },
-      });
       const backendError = error?.response?.data;
       const detail =
         (typeof backendError === "string" && backendError) ||
@@ -182,9 +171,27 @@ export default function VolunteerIncidentsRoute() {
     }
   };
 
-  const handleAcceptIncident = (incidentId) => {
-    setAcceptedIds((current) => (current.includes(incidentId) ? current : [...current, incidentId]));
-    setAvailabilityFeedback("Incident accepted.");
+  const handleAcceptIncident = async (incident) => {
+    const targetId = incident?.alertId || incident?.id;
+    if (!targetId) {
+      setAvailabilityFeedback("This incident cannot be accepted right now.");
+      return;
+    }
+
+    if (incident?.accepted) {
+      setAvailabilityFeedback("This incident is already accepted.");
+      return;
+    }
+
+    try {
+      await api.patch(`/sos/${targetId}/`, { action: "accept" });
+      await loadIncidents();
+      setAvailabilityFeedback("Incident accepted.");
+    } catch (error) {
+      const detail = error?.response?.data?.detail || error?.response?.data?.message || "Unable to accept this incident right now.";
+      setAvailabilityFeedback(detail);
+      Alert.alert("Unable to accept", detail);
+    }
   };
 
   const handleViewDetails = (incident) => {
@@ -195,15 +202,18 @@ export default function VolunteerIncidentsRoute() {
     router.push("/notifications");
   };
 
-  const isVolunteer = useMemo(() => String(userRole || "").toUpperCase() === "VOLUNTEER", [userRole]);
+  const normalizedRole = String(userRole || "").toUpperCase();
+  const isVolunteer = normalizedRole === "VOLUNTEER";
+  const isSecurity = normalizedRole === "SECURITY";
+  const isAllowedRole = isVolunteer || isSecurity;
 
-  // Access guard: show access denied if user role is known and not VOLUNTEER
-  if (userRole && !isVolunteer) {
+  // Access guard: show access denied if user role is known and not VOLUNTEER or SECURITY
+  if (userRole && !isAllowedRole) {
     return (
       <AppScreen>
         <EmptyState
           title="Access denied"
-          message="Volunteer incidents are available to volunteers only."
+          message="Volunteer incidents are available to volunteers and security only."
           icon="shield-outline"
           action={<AppButton title="Return to notifications" onPress={() => router.push("/notifications")} variant="secondary" />}
         />
@@ -211,15 +221,20 @@ export default function VolunteerIncidentsRoute() {
     );
   }
 
+  const pageTitle = isSecurity ? "Security Incidents" : "Volunteer Incidents";
+  const pageSubtitle = isSecurity
+    ? "Monitor community broadcast incidents and coordinate security response."
+    : "Stay available, review community broadcast incidents, and respond quickly.";
+
   return (
     <AppScreen>
       <PageHeader
-        eyebrow="Volunteer" 
-        title="Volunteer incidents"
-        subtitle="Stay available, review community broadcast incidents, and respond quickly."
+        eyebrow={isSecurity ? "Security" : "Volunteer"}
+        title={pageTitle}
+        subtitle={pageSubtitle}
       />
 
-      <SectionCard title="Availability" subtitle="Manage your volunteer presence" icon="shield-outline" style={styles.availabilityCard}>
+      <SectionCard title="Availability" subtitle={isSecurity ? "Manage your security availability and response status" : "Manage your volunteer presence"} icon="shield-outline" style={styles.availabilityCard}>
         <View style={styles.availabilityRow}>
           <View style={styles.availabilityTextWrap}>
             <Text style={styles.availabilityTitle}>{availability.is_available ? "Online" : "Offline"}</Text>
@@ -242,7 +257,7 @@ export default function VolunteerIncidentsRoute() {
         {availabilityFeedback ? <Text style={styles.feedbackText}>{availabilityFeedback}</Text> : null}
       </SectionCard>
 
-      <SectionCard title="Community incidents" subtitle="Broadcast incidents assigned to you" icon="warning-outline">
+      <SectionCard title="Community incidents" subtitle={isSecurity ? "Broadcast incidents relevant to your security response" : "Broadcast incidents assigned to you"} icon="warning-outline">
         {loadingIncidents ? (
           <View style={styles.loadingRow}>
             <ActivityIndicator size="small" color={appColors.blue} />
@@ -253,14 +268,14 @@ export default function VolunteerIncidentsRoute() {
         {!loadingIncidents && incidents.length === 0 ? (
           <EmptyState
             title="No incidents yet"
-            message={isVolunteer ? "Community broadcasts will appear here when you are selected for support." : "This screen is available for volunteer accounts."}
+            message={isVolunteer || isSecurity ? "Community broadcasts will appear here when you are selected for support." : "This screen is available for volunteer and security accounts."}
             icon="sparkles-outline"
           />
         ) : null}
 
         {!loadingIncidents && incidents.length > 0 ? (
           incidents.map((incident) => {
-            const accepted = acceptedIds.includes(incident.id);
+            const accepted = Boolean(incident.accepted);
             return (
               <View key={incident.id} style={styles.incidentCard}>
                 <View style={styles.incidentHeaderRow}>
@@ -292,7 +307,7 @@ export default function VolunteerIncidentsRoute() {
                 </View>
                 <Text style={styles.incidentMessage}>{incident.message}</Text>
                 <View style={styles.incidentActions}>
-                  <AppButton title={accepted ? "Accepted" : "Accept incident"} onPress={() => handleAcceptIncident(incident.id)} loading={false} variant={accepted ? "secondary" : "primary"} style={styles.actionButton} />
+                  <AppButton title={accepted ? "Accepted" : "Accept incident"} onPress={() => handleAcceptIncident(incident)} loading={false} variant={accepted ? "secondary" : "primary"} style={styles.actionButton} />
                   <AppButton title="View details" onPress={() => handleViewDetails(incident)} variant="secondary" style={styles.actionButton} />
                 </View>
               </View>

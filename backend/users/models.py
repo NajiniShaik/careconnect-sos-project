@@ -116,6 +116,8 @@ class SecurityProfile(models.Model):
         blank=True,
         related_name="security_staff"
     )
+    is_available = models.BooleanField(default=False)
+    availability_updated_at = models.DateTimeField(blank=True, null=True)
     employee_id = models.CharField(max_length=50)
     shift = models.CharField(max_length=50)
 

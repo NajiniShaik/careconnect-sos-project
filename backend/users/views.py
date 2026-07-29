@@ -9,6 +9,7 @@ from .models import (
     ResidentProfile, 
     EmergencyContact,
     VolunteerProfile,
+    SecurityProfile,
 )
 
 from .serializers import (
@@ -248,6 +249,34 @@ class VolunteerAvailabilityView(APIView):
         if request.user.role != User.Role.VOLUNTEER:
             return Response({"detail": "Only volunteers can update availability"}, status=status.HTTP_403_FORBIDDEN)
 
+        serializer = VolunteerAvailabilitySerializer(profile, data=request.data, partial=True)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class SecurityAvailabilityView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get_object(self, request):
+        profile, _ = SecurityProfile.objects.get_or_create(user=request.user)
+        return profile
+
+    def get(self, request):
+        if request.user.role != User.Role.SECURITY:
+            return Response({"detail": "Only security staff can access this endpoint"}, status=status.HTTP_403_FORBIDDEN)
+
+        profile = self.get_object(request)
+        serializer = VolunteerAvailabilitySerializer(profile)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def patch(self, request):
+        if request.user.role != User.Role.SECURITY:
+            return Response({"detail": "Only security staff can update availability"}, status=status.HTTP_403_FORBIDDEN)
+
+        profile = self.get_object(request)
         serializer = VolunteerAvailabilitySerializer(profile, data=request.data, partial=True)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

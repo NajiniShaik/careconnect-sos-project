@@ -114,6 +114,9 @@ export default function NotificationsRoute() {
 
   const unreadCount = items.filter((i) => !i.read).length;
   const isVolunteer = String(userRole || "").toUpperCase() === "VOLUNTEER";
+  const isSecurity = String(userRole || "").toUpperCase() === "SECURITY";
+  const showIncidentButton = isVolunteer || isSecurity;
+  const incidentButtonLabel = isVolunteer ? "Volunteer Incidents" : isSecurity ? "Security Incidents" : "Incidents";
 
   const filteredItems = useMemo(() => {
     if (activeFilter === "all") return items;
@@ -260,7 +263,14 @@ export default function NotificationsRoute() {
         eyebrow="Notifications"
         title="Notification center"
         subtitle="Stay informed about alerts, announcements, and society updates."
-        action={isVolunteer ? <AppButton title="Volunteer incidents" onPress={() => router.push("/volunteer-incidents")} variant="secondary" style={styles.inlineButton} /> : undefined}
+        action={showIncidentButton ? (
+          <AppButton
+            title={incidentButtonLabel}
+            onPress={() => router.push("/volunteer-incidents")}
+            variant="secondary"
+            style={styles.inlineButton}
+          />
+        ) : undefined}
       />
 
       <VirtualizedList
