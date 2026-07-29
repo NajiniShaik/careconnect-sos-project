@@ -72,7 +72,7 @@ export default function SocietyForm({ onSubmit, onCancel, initialData }) {
             </div>
 
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "4px" }}>
-                <button onClick={onCancel} style={{ border: "1px solid #cbd5e1", background: "#fff", borderRadius: "999px", padding: "10px 14px", cursor: "pointer", color: "#0f172a", fontWeight: 700 }}>
+                <button onClick={onCancel} style={{ border: "1px solid var(--border)", background: "var(--surface-muted)", borderRadius: "999px", padding: "10px 14px", cursor: "pointer", color: "var(--text)", fontWeight: 700 }}>
                     Cancel
                 </button>
 

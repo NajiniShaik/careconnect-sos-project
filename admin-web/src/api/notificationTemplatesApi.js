@@ -1,105 +1,109 @@
 import axios from "axios";
 
 const API = "http://127.0.0.1:8000/api/notifications";
-const STORAGE_KEY = "cc_notification_templates_v1";
 
 function getAuthHeaders() {
   const token = localStorage.getItem("access");
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-function defaultTemplates() {
-  return [
-    { key: "sos_created", name: "SOS Created", subject: "SOS Created: {{incident_id}}", email: "", sms: "", push_title: "SOS Created", push_message: "SOS reported by {{resident_name}}" },
-    { key: "sos_escalated", name: "SOS Escalated", subject: "SOS Escalated: {{incident_id}}", email: "", sms: "", push_title: "SOS Escalated", push_message: "SOS escalated in {{society_name}}" },
-    { key: "sos_resolved", name: "SOS Resolved", subject: "SOS Resolved: {{incident_id}}", email: "", sms: "", push_title: "SOS Resolved", push_message: "SOS resolved for {{resident_name}}" },
-    { key: "resident_registered", name: "Resident Registered", subject: "Welcome to {{society_name}}", email: "", sms: "", push_title: "Welcome", push_message: "Welcome {{resident_name}}" },
-    { key: "guardian_registered", name: "Guardian Registered", subject: "Guardian Registered", email: "", sms: "", push_title: "Guardian Registered", push_message: "Guardian {{guardian_name}} registered" },
-    { key: "volunteer_assigned", name: "Volunteer Assigned", subject: "Volunteer Assigned", email: "", sms: "", push_title: "Volunteer Assigned", push_message: "{{volunteer_name}} assigned to incident {{incident_id}}" },
-    { key: "security_alert", name: "Security Alert", subject: "Security Alert: {{category}}", email: "", sms: "", push_title: "Security Alert", push_message: "Security alert at {{address}}" },
-    { key: "emergency_contact_verification", name: "Emergency Contact Verification", subject: "Emergency Contact Verification", email: "", sms: "", push_title: "Verify Contact", push_message: "Please verify emergency contact for {{resident_name}}" },
-  ];
+function normalizeChannel(raw) {
+  if (!raw) return "";
+  if (Array.isArray(raw)) return String(raw[0] || "").toUpperCase();
+  return String(raw).toUpperCase();
 }
 
-async function tryServerCall(fn) {
-  try {
-    const res = await fn();
-    return { ok: true, data: res.data };
-  } catch (err) {
-    return { ok: false, error: err };
-  }
+function mapBackendTemplate(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const channel = normalizeChannel(raw.channel || raw.channels);
+  const key = String(raw.template_key || raw.key || raw.templateKey || "").trim();
+  const body = raw.body || "";
+  const title = raw.title || "";
+  return {
+    ...raw,
+    key,
+    template_key: key,
+    name: raw.name || "",
+    subject: raw.subject || "",
+    title,
+    body,
+    variables: Array.isArray(raw.variables) ? raw.variables : [],
+    is_active: Boolean(raw.is_active),
+    created_at: raw.created_at || raw.createdAt || null,
+    updated_at: raw.updated_at || raw.updatedAt || null,
+    channel,
+    email: channel === "EMAIL" ? body : raw.email || "",
+    sms: channel === "SMS" ? body : raw.sms || "",
+    push_title: channel === "PUSH" ? title : raw.push_title || "",
+    push_message: channel === "PUSH" ? body : raw.push_message || "",
+  };
 }
 
 function normalizeTemplatePayload(raw) {
-  if (Array.isArray(raw)) return raw;
-  if (raw?.results && Array.isArray(raw.results)) return raw.results;
-  if (raw?.templates && Array.isArray(raw.templates)) return raw.templates;
-  if (raw?.data && Array.isArray(raw.data)) return raw.data;
-  if (raw?.data?.results && Array.isArray(raw.data.results)) return raw.data.results;
-  if (raw?.data?.templates && Array.isArray(raw.data.templates)) return raw.data.templates;
-  return [];
+  let list = [];
+  if (Array.isArray(raw)) list = raw;
+  else if (raw?.results && Array.isArray(raw.results)) list = raw.results;
+  else if (raw?.templates && Array.isArray(raw.templates)) list = raw.templates;
+  else if (raw?.data && Array.isArray(raw.data)) list = raw.data;
+  else if (raw?.data?.results && Array.isArray(raw.data.results)) list = raw.data.results;
+  else if (raw?.data?.templates && Array.isArray(raw.data.templates)) list = raw.data.templates;
+  return list.map(mapBackendTemplate).filter(Boolean);
+}
+
+function buildSavePayload(template) {
+  const key = String(template.template_key || template.key || template.templateKey || "").trim();
+  const name = String(template.name || "").trim();
+  const subject = String(template.subject || "").trim();
+  const email = String(template.email || "").trim();
+  const sms = String(template.sms || "").trim();
+  const push_title = String(template.push_title || template.pushTitle || "").trim();
+  const push_message = String(template.push_message || template.pushMessage || "").trim();
+  const title = String(template.title || "").trim();
+  const channel = email ? "EMAIL" : sms ? "SMS" : push_message ? "PUSH" : normalizeChannel(template.channel || template.channels) || "EMAIL";
+  const payload = {
+    template_key: key,
+    name,
+    subject,
+    channel,
+    title: channel === "PUSH" ? push_title : title,
+    body: channel === "EMAIL" ? email : channel === "SMS" ? sms : push_message,
+    variables: Array.isArray(template.variables) ? template.variables : [],
+    is_active: template.is_active !== false,
+  };
+  if (channel !== "PUSH") delete payload.title;
+  return payload;
 }
 
 export async function listTemplates() {
   const url = `${API}/templates/`;
-  console.log("[Templates] Fetching...", url);
-  const server = await tryServerCall(() => axios.get(url, { headers: getAuthHeaders() }));
-  console.log("[Templates] API Response:", server);
-  if (server.ok) {
-    const list = normalizeTemplatePayload(server.data);
-    console.log("[Templates] Loaded:", list.length, list);
-    return list;
-  }
-
-  // fallback to localStorage
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw) {
-    const defs = defaultTemplates();
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(defs));
-    return defs;
-  }
-
-  try {
-    return JSON.parse(raw);
-  } catch (err) {
-    const defs = defaultTemplates();
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(defs));
-    return defs;
-  }
+  const res = await axios.get(url, { headers: getAuthHeaders() });
+  return normalizeTemplatePayload(res.data);
 }
 
 export async function saveTemplate(template) {
-  // optimistic: try server, else persist locally
-  const server = await tryServerCall(() => axios.put(`${API}/templates/${template.key}/`, template, { headers: getAuthHeaders() }));
-  if (server.ok) return server.data;
-
-  const list = await listTemplates();
-  const next = list.some((t) => t.key === template.key)
-    ? list.map((t) => (t.key === template.key ? { ...t, ...template } : t))
-    : [...list, template];
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-  return template;
+  const key = String(template.template_key || template.key || template.templateKey || "").trim();
+  const url = `${API}/templates/${encodeURIComponent(key)}/`;
+  const payload = buildSavePayload(template);
+  const res = await axios.put(url, payload, { headers: getAuthHeaders() });
+  return mapBackendTemplate(res.data);
 }
 
 export async function getTemplate(key) {
-  const list = await listTemplates();
-  return list.find((t) => t.key === key) || null;
+  const url = `${API}/templates/${encodeURIComponent(key)}/`;
+  const res = await axios.get(url, { headers: getAuthHeaders() });
+  return mapBackendTemplate(res.data);
 }
 
 export async function deleteTemplate(key) {
-  const server = await tryServerCall(() => axios.delete(`${API}/templates/${key}/`, { headers: getAuthHeaders() }));
-  if (server.ok) return server.data;
-
-  const list = await listTemplates();
-  const next = list.filter((t) => t.key !== key);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-  return next;
+  const url = `${API}/templates/${encodeURIComponent(key)}/`;
+  const res = await axios.delete(url, { headers: getAuthHeaders() });
+  return res.data;
 }
 
 export async function resetTemplates() {
-  const defs = defaultTemplates();
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(defs));
-  return defs;
+  const url = `${API}/templates/reset/`;
+  const res = await axios.post(url, {}, { headers: getAuthHeaders() });
+  return normalizeTemplatePayload(res.data);
 }
 
 const notificationTemplatesApi = { listTemplates, saveTemplate, getTemplate, deleteTemplate, resetTemplates };

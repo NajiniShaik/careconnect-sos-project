@@ -14,9 +14,9 @@ export default function SearchBar({
         padding: "11px 14px",
         marginBottom: "20px",
         borderRadius: "12px",
-        border: "1px solid #cbd5e1",
-        background: "#fff",
-        boxShadow: "0 2px 8px rgba(15, 23, 42, 0.04)",
+        border: "1px solid var(--border)",
+        background: "var(--input-bg)",
+        boxShadow: "var(--glass-shadow)",
         outline: "none",
       }}
     />

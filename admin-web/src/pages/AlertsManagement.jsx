@@ -39,7 +39,7 @@ function Spinner() {
   return (
     <div style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
       <div style={{ width: "18px", height: "18px", borderRadius: "50%", border: "2px solid #bfdbfe", borderTopColor: "#2563eb", animation: "spin 0.8s linear infinite" }} />
-      <span style={{ color: "#64748b" }}>Loading...</span>
+      <span style={{ color: "var(--muted)" }}>Loading...</span>
     </div>
   );
 }
@@ -253,13 +253,13 @@ export default function AlertsManagement() {
           </div>
 
           <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px", background: "#fff", border: "1px solid #e2e8f0", borderRadius: "999px", padding: "8px 12px" }}>
+            <div className="glass-panel" style={{ display: "flex", alignItems: "center", gap: "8px", borderRadius: "999px", padding: "8px 12px" }}>
               <span style={{ fontSize: "14px" }}>🔍</span>
               <input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="Search alerts"
-                style={{ border: "none", outline: "none", minWidth: "220px", fontSize: "14px" }}
+                style={{ border: "none", outline: "none", minWidth: "220px", fontSize: "14px", background: "transparent", color: "var(--text)" }}
               />
             </div>
             <button
@@ -278,14 +278,14 @@ export default function AlertsManagement() {
             { label: "In Progress", value: summary.inProgress, tone: "#d97706" },
             { label: "Resolved", value: summary.resolved, tone: "#16a34a" },
           ].map((item) => (
-            <div key={item.label} style={{ background: "white", border: "1px solid #e2e8f0", borderRadius: "16px", padding: "16px" }}>
+            <div key={item.label} className="glass-panel" style={{ borderRadius: "16px", padding: "16px" }}>
               <div style={{ fontSize: "13px", color: "var(--muted, #64748b)", marginBottom: "6px" }}>{item.label}</div>
               <div style={{ fontSize: "24px", fontWeight: 800, color: item.tone }}>{item.value}</div>
             </div>
           ))}
         </div>
 
-        <div style={{ background: "white", border: "1px solid #e2e8f0", borderRadius: "18px", padding: "16px" }}>
+        <div className="glass-panel" style={{ borderRadius: "18px", padding: "16px" }}>
           <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap", marginBottom: "14px" }}>
             <div style={{ fontWeight: 700, color: "var(--text, #0f172a)" }}>Category</div>
             <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
@@ -294,9 +294,9 @@ export default function AlertsManagement() {
                   key={option}
                   onClick={() => setCategoryFilter(option)}
                   style={{
-                    border: "1px solid #dbeafe",
-                    background: categoryFilter === option ? "#eff6ff" : "white",
-                    color: categoryFilter === option ? "#1d4ed8" : "#475569",
+                    border: "1px solid var(--border)",
+                    background: categoryFilter === option ? "rgba(37, 99, 235, 0.16)" : "var(--surface-muted)",
+                    color: categoryFilter === option ? "var(--primary)" : "var(--muted)",
                     borderRadius: "999px",
                     padding: "7px 12px",
                     cursor: "pointer",
@@ -315,7 +315,7 @@ export default function AlertsManagement() {
               id="status-filter"
               value={statusFilter}
               onChange={(event) => setStatusFilter(event.target.value)}
-              style={{ border: "1px solid #d1d5db", borderRadius: "10px", padding: "8px 10px", minWidth: "150px" }}
+              style={{ border: "1px solid var(--border)", borderRadius: "10px", padding: "8px 10px", minWidth: "150px", background: "var(--input-bg)", color: "var(--text)" }}
             >
               {statusOptions.map((option) => (
                 <option key={option} value={option}>{option}</option>
@@ -344,49 +344,49 @@ export default function AlertsManagement() {
           </div>
         ) : null}
 
-        <div style={{ background: "white", border: "1px solid #e2e8f0", borderRadius: "18px", overflow: "hidden" }}>
+        <div className="glass-panel" style={{ borderRadius: "18px", overflow: "hidden" }}>
           {loading ? (
             <div style={{ padding: "32px", display: "flex", justifyContent: "center", alignItems: "center", minHeight: "220px" }}>
               <Spinner />
             </div>
           ) : alerts.length === 0 ? (
             <div style={{ padding: "32px", textAlign: "center", color: "var(--muted, #64748b)" }}>
-              <div style={{ fontSize: "18px", fontWeight: 700, color: "#0f172a", marginBottom: "6px" }}>No SOS alerts yet</div>
+              <div style={{ fontSize: "18px", fontWeight: 700, color: "var(--text)", marginBottom: "6px" }}>No SOS alerts yet</div>
               <div>Alerts will appear here as soon as residents report them.</div>
             </div>
           ) : filteredAlerts.length === 0 ? (
             <div style={{ padding: "32px", textAlign: "center", color: "var(--muted, #64748b)" }}>
-              <div style={{ fontSize: "18px", fontWeight: 700, color: "#0f172a", marginBottom: "6px" }}>No alerts match the current filters</div>
+              <div style={{ fontSize: "18px", fontWeight: 700, color: "var(--text)", marginBottom: "6px" }}>No alerts match the current filters</div>
               <div>Try adjusting the category or status selection.</div>
             </div>
           ) : (
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
-                  <tr style={{ background: "#f8fafc", textAlign: "left" }}>
-                    <th style={{ padding: "12px 14px", fontSize: "12px", textTransform: "uppercase", color: "#64748b" }}>Resident</th>
-                    <th style={{ padding: "12px 14px", fontSize: "12px", textTransform: "uppercase", color: "#64748b" }}>Category</th>
-                    <th style={{ padding: "12px 14px", fontSize: "12px", textTransform: "uppercase", color: "#64748b" }}>Message</th>
-                    <th style={{ padding: "12px 14px", fontSize: "12px", textTransform: "uppercase", color: "#64748b" }}>Location</th>
-                    <th style={{ padding: "12px 14px", fontSize: "12px", textTransform: "uppercase", color: "#64748b" }}>Status</th>
-                    <th style={{ padding: "12px 14px", fontSize: "12px", textTransform: "uppercase", color: "#64748b" }}>Created</th>
-                    <th style={{ padding: "12px 14px", fontSize: "12px", textTransform: "uppercase", color: "#64748b" }}>Actions</th>
+                  <tr style={{ background: "var(--surface-muted)", textAlign: "left" }}>
+                    <th style={{ padding: "12px 14px", fontSize: "12px", textTransform: "uppercase", color: "var(--muted)", borderBottom: "1px solid var(--border)" }}>Resident</th>
+                    <th style={{ padding: "12px 14px", fontSize: "12px", textTransform: "uppercase", color: "var(--muted)", borderBottom: "1px solid var(--border)" }}>Category</th>
+                    <th style={{ padding: "12px 14px", fontSize: "12px", textTransform: "uppercase", color: "var(--muted)", borderBottom: "1px solid var(--border)" }}>Message</th>
+                    <th style={{ padding: "12px 14px", fontSize: "12px", textTransform: "uppercase", color: "var(--muted)", borderBottom: "1px solid var(--border)" }}>Location</th>
+                    <th style={{ padding: "12px 14px", fontSize: "12px", textTransform: "uppercase", color: "var(--muted)", borderBottom: "1px solid var(--border)" }}>Status</th>
+                    <th style={{ padding: "12px 14px", fontSize: "12px", textTransform: "uppercase", color: "var(--muted)", borderBottom: "1px solid var(--border)" }}>Created</th>
+                    <th style={{ padding: "12px 14px", fontSize: "12px", textTransform: "uppercase", color: "var(--muted)", borderBottom: "1px solid var(--border)" }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {pagedAlerts.map((alert) => {
                     const statusTone = getStatusTone(alert?.status);
                     return (
-                      <tr key={alert.id} style={{ borderTop: "1px solid #e2e8f0" }}>
-                        <td style={{ padding: "12px 14px", fontWeight: 700, color: "#0f172a" }}>{alert?.user?.username || alert?.user?.name || "Unknown"}</td>
-                        <td style={{ padding: "12px 14px", color: "#334155" }}>{String(alert?.category || "Other").replace(/^./, (char) => char.toUpperCase())}</td>
-                        <td style={{ padding: "12px 14px", color: "#334155", maxWidth: "280px" }}>
+                      <tr key={alert.id} style={{ borderTop: "1px solid var(--border)", background: "transparent" }}>
+                        <td style={{ padding: "12px 14px", fontWeight: 700, color: "var(--text)" }}>{alert?.user?.username || alert?.user?.name || "Unknown"}</td>
+                        <td style={{ padding: "12px 14px", color: "var(--muted)" }}>{String(alert?.category || "Other").replace(/^./, (char) => char.toUpperCase())}</td>
+                        <td style={{ padding: "12px 14px", color: "var(--muted)", maxWidth: "280px" }}>
                           <div>{alert?.message || "—"}</div>
                           {Array.isArray(alert?.messages) && alert.messages.length > 0 ? (
                             <div style={{ marginTop: "10px", display: "grid", gap: "8px" }}>
                               {alert.messages.map((message) => (
-                                <div key={message.id || `${message.created_at}-${message.message}`} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "10px" }}>
-                                  <div style={{ fontSize: "13px", color: "#334155", marginBottom: "6px" }}>{message.message || "Voice note"}</div>
+                                <div key={message.id || `${message.created_at}-${message.message}`} style={{ background: "var(--surface-muted)", border: "1px solid var(--border)", borderRadius: "12px", padding: "10px" }}>
+                                  <div style={{ fontSize: "13px", color: "var(--text)", marginBottom: "6px" }}>{message.message || "Voice note"}</div>
                                   {message.audio_url ? (
                                     <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", marginBottom: "6px" }}>
                                       <button onClick={() => handleAudioPlayback(message.audio_url, alert.id)} style={{ border: "none", background: "#2563eb", color: "white", borderRadius: "999px", padding: "6px 10px", cursor: "pointer", fontWeight: 700 }}>
@@ -396,13 +396,13 @@ export default function AlertsManagement() {
                                   ) : null}
                                   {message.audio_url ? (
                                     message.transcription_status === "PENDING" ? (
-                                      <div style={{ color: "#64748b", fontSize: "12px" }}>Transcribing...</div>
+                                      <div style={{ color: "var(--muted)", fontSize: "12px" }}>Transcribing...</div>
                                     ) : message.transcript ? (
-                                      <div style={{ color: "#334155", fontSize: "12px", lineHeight: 1.5 }}>Transcript: {message.transcript}</div>
+                                      <div style={{ color: "var(--text)", fontSize: "12px", lineHeight: 1.5 }}>Transcript: {message.transcript}</div>
                                     ) : (
                                       <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                        <div style={{ color: "#64748b", fontSize: "12px" }}>Transcript unavailable.</div>
-                                        <button onClick={() => void handleRetryTranscription(alert)} disabled={transcribingIds[String(alert.id)]} style={{ border: "1px solid #dbeafe", background: "white", color: "#2563eb", borderRadius: "999px", padding: "5px 10px", cursor: "pointer", fontWeight: 700 }}>
+                                        <div style={{ color: "var(--muted)", fontSize: "12px" }}>Transcript unavailable.</div>
+                                        <button onClick={() => void handleRetryTranscription(alert)} disabled={transcribingIds[String(alert.id)]} style={{ border: "1px solid var(--border)", background: "var(--surface-muted)", color: "var(--primary)", borderRadius: "999px", padding: "5px 10px", cursor: "pointer", fontWeight: 700 }}>
                                           {transcribingIds[String(alert.id)] ? "Retrying..." : "Retry transcription"}
                                         </button>
                                       </div>
@@ -413,13 +413,13 @@ export default function AlertsManagement() {
                             </div>
                           ) : null}
                         </td>
-                        <td style={{ padding: "12px 14px", color: "#334155" }}>{alert?.location || "—"}</td>
+                        <td style={{ padding: "12px 14px", color: "var(--muted)" }}>{alert?.location || "—"}</td>
                         <td style={{ padding: "12px 14px" }}>
                           <span style={{ display: "inline-block", padding: "6px 10px", borderRadius: "999px", fontSize: "12px", fontWeight: 700, background: statusTone.background, color: statusTone.color }}>
                             {String(alert?.status || "OPEN").replace(/_/g, " ")}
                           </span>
                         </td>
-                        <td style={{ padding: "12px 14px", color: "#64748b", whiteSpace: "nowrap" }}>{formatTime(alert?.created_at)}</td>
+                        <td style={{ padding: "12px 14px", color: "var(--muted)", whiteSpace: "nowrap" }}>{formatTime(alert?.created_at)}</td>
                         <td style={{ padding: "12px 14px" }}>
                           <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
                             {canResolve ? (
@@ -453,14 +453,14 @@ export default function AlertsManagement() {
 
         {!loading && !notification && filteredAlerts.length > 0 ? (
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap", padding: "0 4px" }}>
-            <div style={{ color: "#64748b", fontSize: "13px" }}>
+            <div style={{ color: "var(--muted)", fontSize: "13px" }}>
               Showing {Math.min((page - 1) * 10 + 1, filteredAlerts.length)}–{Math.min(page * 10, filteredAlerts.length)} of {filteredAlerts.length} alerts
             </div>
             <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
               <button
                 onClick={() => handlePageChange(page - 1)}
                 disabled={page === 1}
-                style={{ border: "1px solid #dbeafe", background: page === 1 ? "#f8fafc" : "#fff", color: page === 1 ? "#94a3b8" : "#2563eb", borderRadius: "999px", padding: "8px 12px", fontWeight: 700, cursor: page === 1 ? "not-allowed" : "pointer" }}
+                style={{ border: "1px solid var(--border)", background: page === 1 ? "var(--surface-muted)" : "var(--surface-glass)", color: page === 1 ? "var(--muted)" : "var(--primary)", borderRadius: "999px", padding: "8px 12px", fontWeight: 700, cursor: page === 1 ? "not-allowed" : "pointer" }}
               >
                 Previous
               </button>
@@ -468,7 +468,7 @@ export default function AlertsManagement() {
                 <button
                   key={pageNumber}
                   onClick={() => handlePageChange(pageNumber)}
-                  style={{ minWidth: "36px", border: "1px solid #dbeafe", background: pageNumber === page ? "#2563eb" : "#fff", color: pageNumber === page ? "#fff" : "#2563eb", borderRadius: "999px", padding: "8px 10px", fontWeight: 700, cursor: "pointer" }}
+                  style={{ minWidth: "36px", border: "1px solid var(--border)", background: pageNumber === page ? "var(--primary)" : "var(--surface-glass)", color: pageNumber === page ? "#fff" : "var(--primary)", borderRadius: "999px", padding: "8px 10px", fontWeight: 700, cursor: "pointer" }}
                 >
                   {pageNumber}
                 </button>
@@ -476,7 +476,7 @@ export default function AlertsManagement() {
               <button
                 onClick={() => handlePageChange(page + 1)}
                 disabled={page === totalPages}
-                style={{ border: "1px solid #dbeafe", background: page === totalPages ? "#f8fafc" : "#fff", color: page === totalPages ? "#94a3b8" : "#2563eb", borderRadius: "999px", padding: "8px 12px", fontWeight: 700, cursor: page === totalPages ? "not-allowed" : "pointer" }}
+                style={{ border: "1px solid var(--border)", background: page === totalPages ? "var(--surface-muted)" : "var(--surface-glass)", color: page === totalPages ? "var(--muted)" : "var(--primary)", borderRadius: "999px", padding: "8px 12px", fontWeight: 700, cursor: page === totalPages ? "not-allowed" : "pointer" }}
               >
                 Next
               </button>

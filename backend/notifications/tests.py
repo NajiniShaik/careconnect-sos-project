@@ -77,6 +77,30 @@ class NotificationDeviceRegistrationTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(DeviceToken.objects.filter(user=self.user, token="android-token-123").exists())
 
+    def test_unregister_device_token_removes_user_device_token_and_record(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(
+            "/api/notifications/register-device/",
+            {"device_token": "android-token-123"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.device_token, "android-token-123")
+        self.assertTrue(DeviceToken.objects.filter(user=self.user, token="android-token-123").exists())
+
+        response = self.client.delete(
+            "/api/notifications/register-device/",
+            {"token": "android-token-123"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["success"], True)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.device_token, "")
+        self.assertFalse(DeviceToken.objects.filter(user=self.user, token="android-token-123").exists())
+
     def test_register_device_token_reassigns_existing_token_to_current_user(self):
         other_user = self.user_model.objects.create_user(
             username="admin_token",
@@ -224,6 +248,17 @@ class NotificationListAndReadTests(TestCase):
         self.assertEqual(delivery.channel, "Push")
         self.assertEqual(delivery.recipient_address, "device-t...-123")
         self.assertEqual(delivery.status, "Sent")
+
+    def test_push_task_handles_missing_notification_record_without_crashing(self):
+        with patch("notifications.tasks.NotificationService.send_push_notification", return_value=False):
+            result = send_push_notification_task(
+                ["device-token-123"],
+                "Emergency SOS Alert",
+                "Emergency",
+                data={"notification_id": 999999},
+            )
+
+        self.assertFalse(result)
 
 
 class NotificationDeliveryTrackingTests(TestCase):

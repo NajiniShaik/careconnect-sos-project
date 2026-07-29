@@ -5,29 +5,29 @@ export default function DataTable({
     renderCell,
 }) {
     return (
-        <div style={{ background: "#fff", borderRadius: "16px", border: "1px solid #e2e8f0", overflow: "hidden", boxShadow: "0 10px 30px rgba(15, 23, 42, 0.06)" }}>
+        <div className="glass-panel" style={{ borderRadius: "16px", overflow: "hidden", boxShadow: "var(--glass-shadow)" }}>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                <thead style={{ background: "#f8fafc" }}>
+                <thead style={{ background: "var(--surface-muted)" }}>
                     <tr>
                         {columns.map((column) => (
-                            <th key={column} style={{ padding: "14px 16px", textAlign: "left", fontSize: "12px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.08em" }}>{column}</th>
+                            <th key={column} style={{ padding: "14px 16px", textAlign: "left", fontSize: "12px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.08em", borderBottom: "1px solid var(--border)" }}>{column}</th>
                         ))}
-                        {renderActions && <th style={{ padding: "14px 16px", textAlign: "right", fontSize: "12px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.08em" }}>Actions</th>}
+                        {renderActions && <th style={{ padding: "14px 16px", textAlign: "right", fontSize: "12px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.08em", borderBottom: "1px solid var(--border)" }}>Actions</th>}
                     </tr>
                 </thead>
 
                 <tbody>
                     {data.length === 0 ? (
                         <tr>
-                            <td colSpan={columns.length + (renderActions ? 1 : 0)} style={{ padding: "28px 16px", textAlign: "center", color: "#64748b" }}>
+                            <td colSpan={columns.length + (renderActions ? 1 : 0)} style={{ padding: "28px 16px", textAlign: "center", color: "var(--muted)", borderTop: "1px solid var(--border)" }}>
                                 No Records Found
                             </td>
                         </tr>
                     ) : (
                         data.map((item, index) => (
-                            <tr key={item.id || `${item.name || "row"}-${index}`} style={{ borderTop: "1px solid #f1f5f9", background: index % 2 === 0 ? "#fff" : "#fbfdff" }}>
+                            <tr key={item.id || `${item.name || "row"}-${index}`} style={{ borderTop: "1px solid var(--border)", background: index % 2 === 0 ? "transparent" : "var(--table-hover)" }}>
                                 {columns.map((column) => (
-                                    <td key={column} style={{ padding: "14px 16px", color: "#0f172a", fontSize: "14px" }}>
+                                    <td key={column} style={{ padding: "14px 16px", color: "var(--text)", fontSize: "14px" }}>
                                         {renderCell ? (
                                             renderCell(item, column)
                                         ) : typeof item[column.toLowerCase()] === "boolean" ? (

@@ -8,10 +8,12 @@ import {
   startNotificationsPolling,
   ensureDeviceRegistration,
   addNotificationListener,
+  addPushTokenListener,
   shouldProcessForegroundNotification,
   saveLocalNotification,
   fetchNotificationsFromBackend,
   clearNotificationListeners,
+  retryPendingDeviceRegistration,
 } from "../../services/notificationService";
 import { Platform, type ColorValue } from "react-native";
 import * as Notifications from "expo-notifications";
@@ -37,6 +39,7 @@ export default function AppLayout() {
   // initialize notifications when app layout mounts and user is authenticated
   useEffect(() => {
     let unsub: (() => void) | null = null;
+    let unsubscribePushTokenListener: (() => void) | null = null;
     const init = async () => {
       const token = await getStoredToken();
       const user = await getStoredUser();
@@ -47,6 +50,11 @@ export default function AppLayout() {
       }
 
       await startNotificationsPolling();
+      try {
+        await retryPendingDeviceRegistration();
+      } catch {
+        // ignore pending retry errors; continue to fresh registration attempt
+      }
       try {
         await ensureDeviceRegistration();
       } catch {
@@ -107,6 +115,18 @@ export default function AppLayout() {
         }
       };
 
+      unsubscribePushTokenListener = addPushTokenListener(async (token) => {
+        if (!token) return;
+        try {
+          const authToken = await getStoredToken();
+          const currentUser = await getStoredUser();
+          if (!authToken || !currentUser?.id) return;
+          await ensureDeviceRegistration();
+        } catch {
+          // ignore token-refresh registration failures
+        }
+      });
+
       unsub = addNotificationListener({
         onReceived: async (n: Notifications.Notification) => {
           const payload = n.request.content;
@@ -165,6 +185,7 @@ export default function AppLayout() {
     void init();
     return () => {
       if (unsub) unsub();
+      if (unsubscribePushTokenListener) unsubscribePushTokenListener();
       clearNotificationListeners();
       stopNotificationsPolling();
     };

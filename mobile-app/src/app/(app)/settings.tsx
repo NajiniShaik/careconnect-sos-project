@@ -25,7 +25,7 @@ export default function SettingsRoute() {
     try {
       console.log("[settings] Starting logout...");
       setIsLoggingOut(true);
-      notificationService.cleanupOnLogout();
+      await notificationService.cleanupOnLogout();
       await clearAuth();
       console.log("[settings] Auth cleared, navigating to root...");
       setShowLogoutModal(false);

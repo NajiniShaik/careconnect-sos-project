@@ -293,20 +293,23 @@ def send_push_notification_task(device_tokens, title, body, data=None):
     logger.info("Starting Celery push notification task for %s recipients", len(device_tokens or []))
     logger.info("[FCM] Celery push payload title=%s body=%s data=%s", title, body, data or {})
     notification_id = None
+    notification = None
     try:
         payload = data or {}
         if isinstance(payload, dict):
             notification_id = payload.get("notification_id")
+        if notification_id:
+            try:
+                notification = Notification.objects.get(id=notification_id)
+            except Notification.DoesNotExist:
+                notification = None
+
         service = NotificationService()
         result = service.send_push_notification(device_tokens, title, body, data=data)
         recipients = device_tokens or []
         if notification_id:
-            try:
-                notification = Notification.objects.get(id=notification_id)
-                recipient_name, recipient_role = _get_recipient_identity(notification)
-            except Notification.DoesNotExist:
-                recipient_name, recipient_role = "", ""
-
+            recipient_name, recipient_role = _get_recipient_identity(notification)
+            notification_type = getattr(notification, "kind", "") or ""
             for recipient in recipients:
                 _update_delivery_status(
                     notification_id,
@@ -316,7 +319,7 @@ def send_push_notification_task(device_tokens, title, body, data=None):
                     recipient_name=recipient_name,
                     recipient_role=recipient_role,
                     recipient_address_value=str(recipient),
-                    notification_type=getattr(notification, "kind", "") or "",
+                    notification_type=notification_type,
                     failure_reason="" if result else "Push delivery failed",
                 )
         logger.info("Finished Celery push notification task result=%s", result)
@@ -324,11 +327,7 @@ def send_push_notification_task(device_tokens, title, body, data=None):
     except Exception:
         logger.exception("Celery push notification task failed")
         if notification_id:
-            try:
-                notification = Notification.objects.get(id=notification_id)
-                recipient_name, recipient_role = _get_recipient_identity(notification)
-            except Notification.DoesNotExist:
-                recipient_name, recipient_role = "", ""
+            recipient_name, recipient_role = _get_recipient_identity(notification)
             _update_delivery_status(
                 notification_id,
                 "Push",

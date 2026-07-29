@@ -160,3 +160,28 @@ class DeviceToken(models.Model):
 
 	def __str__(self):
 		return f"{self.user} - {self.platform} - {self.device_id or self.token[:8]}"
+
+
+class NotificationTemplate(models.Model):
+    CHANNEL_CHOICES = (
+        ("EMAIL", "Email"),
+        ("SMS", "SMS"),
+        ("PUSH", "Push"),
+    )
+
+    name = models.CharField(max_length=200)
+    template_key = models.CharField(max_length=150, unique=True, db_index=True)
+    channel = models.CharField(max_length=20, choices=CHANNEL_CHOICES, default="EMAIL")
+    subject = models.CharField(max_length=250, blank=True, default="")
+    title = models.CharField(max_length=150, blank=True, default="")
+    body = models.TextField(blank=True, default="")
+    variables = models.JSONField(default=list, blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-updated_at", "-created_at"]
+
+    def __str__(self):
+        return f"{self.template_key} ({self.name})"

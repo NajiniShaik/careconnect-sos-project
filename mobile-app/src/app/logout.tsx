@@ -10,7 +10,7 @@ export default function LogoutScreen() {
     const performLogout = async () => {
       try {
         console.log("[logout-route] Starting logout...");
-        notificationService.cleanupOnLogout();
+        await notificationService.cleanupOnLogout();
         await clearAuth();
         console.log("[logout-route] Auth cleared, redirecting to index...");
         

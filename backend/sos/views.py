@@ -345,6 +345,7 @@ class CreateSOSView(APIView):
                 logger.info("[SOS] routing recipients=%s resident=%s society=%s", [getattr(user, "username", "") for user in recipients_to_notify], getattr(request.user, "username", ""), society_name)
                 notification_body = f"{resident_name} has triggered an SOS."
                 created_notifications = []
+                created_notification_ids = []
                 for recipient in recipients_to_notify:
                     notification = Notification.objects.create(
                         user=recipient,
@@ -359,6 +360,7 @@ class CreateSOSView(APIView):
                         },
                     )
                     created_notifications.append((recipient, notification))
+                    created_notification_ids.append(notification.id)
 
                 primary_notification_id = created_notifications[0][1].id if created_notifications else None
 

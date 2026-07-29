@@ -1,7 +1,7 @@
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 
-export default function Header({ theme, toggleTheme }) {
+export default function Header({ theme, toggleTheme, toggleSidebar, mobileOpen }) {
   const navigate = useNavigate();
 
   const handleLogout = async () => {
@@ -46,9 +46,30 @@ export default function Header({ theme, toggleTheme }) {
         color: "var(--text, #0f172a)",
       }}
     >
-      <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <button
+          onClick={() => toggleSidebar && toggleSidebar()}
+          aria-label={mobileOpen ? "Close menu" : "Open menu"}
+          aria-expanded={mobileOpen ? "true" : "false"}
+          style={{
+            border: "none",
+            background: "transparent",
+            cursor: "pointer",
+            padding: 8,
+            marginRight: 6,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 20,
+          }}
+        >
+          ☰
+        </button>
+
+        <div>
         <div style={{ fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.24em", color: "var(--muted, #64748b)" }}>Operations overview</div>
         <h2 style={{ margin: "2px 0 0", fontSize: "20px", fontWeight: 800, color: "var(--text, #0f172a)" }}>Good morning, Admin</h2>
+        </div>
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>

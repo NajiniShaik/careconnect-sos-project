@@ -59,7 +59,7 @@ export default function FlatForm({
             <div style={{ display: "grid", gap: "14px" }}>
                 <div>
                     <label style={{ display: "block", marginBottom: "6px", fontWeight: 700, color: "#0f172a" }}>Block</label>
-                    <select name="block" value={formData.block} onChange={handleChange} required style={{ width: "100%", padding: "11px 12px", borderRadius: "12px", border: "1px solid #cbd5e1", boxSizing: "border-box", background: "#fff" }}>
+                    <select name="block" value={formData.block} onChange={handleChange} required style={{ width: "100%", padding: "11px 12px", borderRadius: "12px", border: "1px solid var(--border)", boxSizing: "border-box", background: "var(--input-bg)" }}>
                         <option value="">Select Block</option>
                         {blocks.map((block) => (
                             <option key={block.id} value={block.id}>{block.name}</option>
@@ -79,7 +79,7 @@ export default function FlatForm({
 
                 <div>
                     <label style={{ display: "block", marginBottom: "6px", fontWeight: 700, color: "#0f172a" }}>Type</label>
-                    <select name="flat_type" value={formData.flat_type} onChange={handleChange} style={{ width: "100%", padding: "11px 12px", borderRadius: "12px", border: "1px solid #cbd5e1", boxSizing: "border-box", background: "#fff" }}>
+                    <select name="flat_type" value={formData.flat_type} onChange={handleChange} style={{ width: "100%", padding: "11px 12px", borderRadius: "12px", border: "1px solid var(--border)", boxSizing: "border-box", background: "var(--input-bg)" }}>
                         <option>1 BHK</option>
                         <option>2 BHK</option>
                         <option>3 BHK</option>
@@ -92,7 +92,7 @@ export default function FlatForm({
 
                 <div>
                     <label style={{ display: "block", marginBottom: "6px", fontWeight: 700, color: "#0f172a" }}>Occupied</label>
-                    <select name="is_occupied" value={formData.is_occupied} onChange={handleChange} style={{ width: "100%", padding: "11px 12px", borderRadius: "12px", border: "1px solid #cbd5e1", boxSizing: "border-box", background: "#fff" }}>
+                    <select name="is_occupied" value={formData.is_occupied} onChange={handleChange} style={{ width: "100%", padding: "11px 12px", borderRadius: "12px", border: "1px solid var(--border)", boxSizing: "border-box", background: "var(--input-bg)" }}>
                         <option value={false}>No</option>
                         <option value={true}>Yes</option>
                     </select>
@@ -100,7 +100,7 @@ export default function FlatForm({
             </div>
 
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 20 }}>
-                <button type="button" onClick={onCancel} style={{ border: "1px solid #cbd5e1", background: "#fff", borderRadius: "999px", padding: "10px 14px", cursor: "pointer", color: "#0f172a", fontWeight: 700 }}>
+                <button type="button" onClick={onCancel} style={{ border: "1px solid var(--border)", background: "var(--surface-muted)", borderRadius: "999px", padding: "10px 14px", cursor: "pointer", color: "var(--text)", fontWeight: 700 }}>
                     Cancel
                 </button>
                 <button type="submit" style={{ border: "none", background: "linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)", borderRadius: "999px", padding: "10px 14px", cursor: "pointer", color: "#fff", fontWeight: 700 }}>

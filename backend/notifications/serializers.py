@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from .models import DeviceToken, EscalationConfiguration, EscalationLog, NotificationDelivery
+from .models import NotificationTemplate
 
 
 class DeviceTokenSerializer(serializers.ModelSerializer):
@@ -98,3 +99,22 @@ class EscalationConfigurationSerializer(serializers.ModelSerializer):
         if value <= 0:
             raise serializers.ValidationError("Response timeout must be greater than 0")
         return value
+
+
+class NotificationTemplateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = NotificationTemplate
+        fields = (
+            "id",
+            "name",
+            "template_key",
+            "channel",
+            "subject",
+            "title",
+            "body",
+            "variables",
+            "is_active",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("id", "created_at", "updated_at")

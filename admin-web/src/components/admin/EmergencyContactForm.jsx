@@ -56,7 +56,7 @@ export default function EmergencyContactForm({
                 {role === "ADMIN" && (
                     <div>
                         <label style={{ display: "block", marginBottom: "6px", fontWeight: 700, color: "#0f172a" }}>Resident</label>
-                        <select name="resident" value={formData.resident} onChange={handleChange} required style={{ width: "100%", padding: "11px 12px", borderRadius: "12px", border: "1px solid #cbd5e1", boxSizing: "border-box", background: "#fff" }}>
+                        <select name="resident" value={formData.resident} onChange={handleChange} required style={{ width: "100%", padding: "11px 12px", borderRadius: "12px", border: "1px solid var(--border)", boxSizing: "border-box", background: "var(--input-bg)" }}>
                             <option value="">Select Resident</option>
                             {residents.map((resident) => (
                                 <option key={resident.id} value={resident.id}>{resident.username}</option>
@@ -82,7 +82,7 @@ export default function EmergencyContactForm({
 
                 <div>
                     <label style={{ display: "block", marginBottom: "6px", fontWeight: 700, color: "#0f172a" }}>Contact Type</label>
-                    <select name="contact_type" value={formData.contact_type} onChange={handleChange} style={{ width: "100%", padding: "11px 12px", borderRadius: "12px", border: "1px solid #cbd5e1", boxSizing: "border-box", background: "#fff" }}>
+                    <select name="contact_type" value={formData.contact_type} onChange={handleChange} style={{ width: "100%", padding: "11px 12px", borderRadius: "12px", border: "1px solid var(--border)", boxSizing: "border-box", background: "var(--input-bg)" }}>
                         <option value="PRIMARY_GUARDIAN">Primary Guardian</option>
                         <option value="SECONDARY_GUARDIAN">Secondary Guardian</option>
                         <option value="EMERGENCY_CONTACT">Emergency Contact</option>
@@ -91,7 +91,7 @@ export default function EmergencyContactForm({
             </div>
 
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 20 }}>
-                <button type="button" onClick={onCancel} style={{ border: "1px solid #cbd5e1", background: "#fff", borderRadius: "999px", padding: "10px 14px", cursor: "pointer", color: "#0f172a", fontWeight: 700 }}>
+                <button type="button" onClick={onCancel} style={{ border: "1px solid var(--border)", background: "var(--surface-muted)", borderRadius: "999px", padding: "10px 14px", cursor: "pointer", color: "var(--text)", fontWeight: 700 }}>
                     Cancel
                 </button>
                 <button type="submit" style={{ border: "none", background: "linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)", borderRadius: "999px", padding: "10px 14px", cursor: "pointer", color: "#fff", fontWeight: 700 }}>

@@ -11,6 +11,9 @@ from .views import (
     EscalationLogDetailView,
     DeliveryStatusListView,
     DeliveryStatusDetailView,
+    NotificationTemplateListView,
+    NotificationTemplateDetailView,
+    ResetNotificationTemplatesView,
 )
 
 app_name = "notifications"
@@ -27,4 +30,7 @@ urlpatterns = [
     path("notifications/<int:pk>/read/", MarkNotificationReadView.as_view(), name="notification-read"),
     path("notifications/<int:pk>/", NotificationDetailView.as_view(), name="notification-detail"),
     path("mark-all-read/", MarkAllNotificationsReadView.as_view(), name="mark-all-read"),
+    path("templates/", NotificationTemplateListView.as_view(), name="templates-list"),
+    path("templates/reset/", ResetNotificationTemplatesView.as_view(), name="templates-reset"),
+    path("templates/<str:key>/", NotificationTemplateDetailView.as_view(), name="templates-detail"),
 ]

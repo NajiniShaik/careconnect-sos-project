@@ -6,6 +6,8 @@ import AdminLayout from "../components/common/AdminLayout";
 import DataTable from "../components/common/DataTable";
 import FilterBar from "../components/common/FilterBar";
 import PageTitle from "../components/common/PageTitle";
+import Charts from "../components/common/Charts";
+import "./Dashboard.css";
 import {
   getAlertDashboardOverview,
   getAlertDashboardRecentActivity,
@@ -67,7 +69,7 @@ function StatCard({ title, value, subtitle, tone = "primary" }) {
   };
 
   return (
-    <div style={{ background: "#fff", borderRadius: "18px", border: "1px solid #e2e8f0", padding: "18px", boxShadow: "0 10px 30px rgba(15, 23, 42, 0.06)" }}>
+    <div className="glass-panel" style={{ borderRadius: "18px", padding: "18px" }}>
       <div style={{ fontSize: "13px", fontWeight: 700, color: "var(--muted, #64748b)", textTransform: "uppercase", letterSpacing: "0.08em" }}>{title}</div>
       <div style={{ fontSize: "28px", fontWeight: 800, color: toneMap[tone]?.color || "#0f172a", margin: "8px 0 4px" }}>{value}</div>
       <div style={{ color: "#64748b", fontSize: "13px" }}>{subtitle}</div>
@@ -75,28 +77,7 @@ function StatCard({ title, value, subtitle, tone = "primary" }) {
   );
 }
 
-function ChartCard({ title, data }) {
-  const maxValue = Math.max(...data.map((item) => item.value), 1);
-
-  return (
-    <div style={{ background: "#fff", borderRadius: "18px", border: "1px solid #e2e8f0", padding: "18px", boxShadow: "0 10px 30px rgba(15, 23, 42, 0.06)" }}>
-      <div style={{ fontSize: "15px", fontWeight: 800, color: "#0f172a", marginBottom: "14px" }}>{title}</div>
-      <div style={{ display: "grid", gap: "10px" }}>
-        {data.map((item) => (
-          <div key={item.label}>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "13px", color: "#64748b", marginBottom: "6px" }}>
-              <span>{item.label}</span>
-              <span style={{ fontWeight: 700, color: "#0f172a" }}>{item.value}</span>
-            </div>
-            <div style={{ height: "10px", borderRadius: "999px", background: "#e2e8f0", overflow: "hidden" }}>
-              <div style={{ width: `${(item.value / maxValue) * 100}%`, height: "100%", borderRadius: "999px", background: item.color || "#2563eb" }} />
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
+// Charts are rendered via responsive Recharts components in ../components/common/Charts
 
 function Dashboard() {
   const navigate = useNavigate();
@@ -280,33 +261,6 @@ function Dashboard() {
     setPage(1);
   }, [search, sortField, sortDirection]);
 
-  const handleLogout = async () => {
-    const refresh = localStorage.getItem("refresh");
-    const access = localStorage.getItem("access");
-
-    try {
-      if (refresh && access) {
-        await axios.post(
-          "http://127.0.0.1:8000/api/users/logout/",
-          { refresh },
-          {
-            headers: {
-              Authorization: `Bearer ${access}`,
-            },
-          }
-        );
-      }
-    } catch (error) {
-      console.log("Logout request failed:", error.response?.data || error.message);
-    } finally {
-      localStorage.removeItem("access");
-      localStorage.removeItem("refresh");
-      localStorage.removeItem("user");
-      localStorage.removeItem("role");
-      navigate("/", { replace: true });
-    }
-  };
-
   return (
     <AdminLayout>
       <div style={{ display: "grid", gap: "18px" }}>
@@ -315,9 +269,6 @@ function Dashboard() {
             <PageTitle title="Alert Monitoring Dashboard" />
             <p style={{ margin: "-6px 0 0", color: "var(--muted, #64748b)" }}>Monitor live incidents, deliverability, response timings, and recent activity from one admin view.</p>
           </div>
-          <button onClick={handleLogout} style={{ border: "none", background: "#fff1f2", color: "#be123c", padding: "10px 14px", borderRadius: "999px", fontWeight: 700, cursor: "pointer" }}>
-            Logout
-          </button>
         </div>
 
         {error ? (
@@ -347,21 +298,44 @@ function Dashboard() {
           <StatCard title="Avg Resolution" value={formatDuration(responseSummary.resolutionAverage)} subtitle="Average resolution time" tone="success" />
         </div>
 
-        <div style={{ background: "#fff", borderRadius: "18px", border: "1px solid #e2e8f0", padding: "18px", boxShadow: "0 10px 30px rgba(15, 23, 42, 0.06)" }}>
+        <div className="glass-panel" style={{ borderRadius: "18px", padding: "18px" }}>
           <div style={{ fontSize: "15px", fontWeight: 800, color: "#0f172a", marginBottom: "8px" }}>Longest Active Incident</div>
           <div style={{ color: "#64748b" }}>
             {responseSummary.longestActive ? `${responseSummary.longestActive.resident} • ${formatDuration(responseSummary.longestActive.duration)}` : "No active incidents available yet."}
           </div>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "16px" }}>
-          <ChartCard title="Incidents per Society" data={chartData.society} />
-          <ChartCard title="Incidents by Category" data={chartData.category} />
-          <ChartCard title="Incidents by Hour" data={chartData.hour} />
-          <ChartCard title="Incidents by Day" data={chartData.day} />
+        <div className="analytics-top">
+          <StatCard title="Total Incidents" value={monitoringData.length || overview.total_incidents || 0} subtitle="Total incidents recorded" tone="primary" />
+          <StatCard title="Active SOS" value={overview.active_incidents ?? incidentStageSummary.Active} subtitle="Currently open" tone="danger" />
+          <StatCard title="Average Response Time" value={formatDuration(responseSummary.resolutionAverage)} subtitle="Average resolution" tone="warning" />
+          <StatCard title="Longest Active Incident" value={responseSummary.longestActive ? `${responseSummary.longestActive.resident}` : "—"} subtitle={responseSummary.longestActive ? formatDuration(responseSummary.longestActive.duration) : "No active incidents"} tone="purple" />
         </div>
 
-        <div style={{ background: "#fff", borderRadius: "18px", border: "1px solid #e2e8f0", padding: "20px", boxShadow: "0 10px 30px rgba(15, 23, 42, 0.06)" }}>
+        <div className="analytics-grid" style={{ marginTop: 18 }}>
+          <div className="analytics-card">
+            <div className="chart-card">
+              <Charts.HourBar data={chartData.hour} />
+            </div>
+          </div>
+          <div className="analytics-card">
+            <div className="chart-card">
+              <Charts.CategoryDonut data={chartData.category} />
+            </div>
+          </div>
+          <div className="analytics-card">
+            <div className="chart-card">
+              <Charts.SocietyChart data={chartData.society} />
+            </div>
+          </div>
+          <div className="analytics-card">
+            <div className="chart-card">
+              <Charts.DayBar data={chartData.day} />
+            </div>
+          </div>
+        </div>
+
+        <div className="glass-panel" style={{ borderRadius: "18px", padding: "20px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap", marginBottom: "16px" }}>
             <div>
               <h3 style={{ margin: 0, color: "#0f172a" }}>Recent Activity</h3>

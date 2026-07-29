@@ -2,7 +2,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import AdminLayout from "../components/common/AdminLayout";
 import PageTitle from "../components/common/PageTitle";
-import { getEscalationLogs } from "../api/escalationApi";
+import { getEscalationLogs, deleteEscalationLog, deleteAllEscalationLogs } from "../api/escalationApi";
+import ConfirmDialog from "../components/common/ConfirmDialog";
 
 const levelOptions = [
   { value: "", label: "All Levels" },
@@ -32,6 +33,12 @@ export default function EscalationLogs() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [pagination, setPagination] = useState({ count: 0, next: null, previous: null });
+  const [toast, setToast] = useState(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmMessage, setConfirmMessage] = useState("");
+  const [confirmTitle, setConfirmTitle] = useState("");
+  const [confirmAction, setConfirmAction] = useState(() => null);
+  const [, setConfirmLoading] = useState(false);
 
   const loadLogs = useCallback(async (nextPage = 1) => {
     setLoading(true);
@@ -84,6 +91,54 @@ export default function EscalationLogs() {
     setSearch(event.target.value);
   };
 
+  useEffect(() => {
+    if (!toast) return undefined;
+    const id = window.setTimeout(() => setToast(null), 3200);
+    return () => window.clearTimeout(id);
+  }, [toast]);
+
+  const openDeleteConfirm = (log) => {
+    setConfirmTitle("Delete Escalation Log");
+    setConfirmMessage("Are you sure you want to delete this escalation log?");
+    setConfirmAction(() => async () => {
+      setConfirmLoading(true);
+      try {
+        await deleteEscalationLog(log.id);
+        setLogs((prev) => prev.filter((l) => l.id !== log.id));
+        setPagination((p) => ({ ...p, count: Math.max(0, (p.count || 0) - 1) }));
+        setToast({ type: "success", message: "Escalation log deleted." });
+      } catch (err) {
+        const message = err?.response?.data?.detail || err?.response?.data?.message || "Unable to delete escalation log.";
+        setToast({ type: "error", message });
+      } finally {
+        setConfirmLoading(false);
+        setConfirmOpen(false);
+      }
+    });
+    setConfirmOpen(true);
+  };
+
+  const openDeleteAllConfirm = () => {
+    setConfirmTitle("Delete All Escalation Logs");
+    setConfirmMessage("This will permanently delete ALL escalation logs. This action cannot be undone.");
+    setConfirmAction(() => async () => {
+      setConfirmLoading(true);
+      try {
+        await deleteAllEscalationLogs();
+        // reload first page
+        await loadLogs(1);
+        setToast({ type: "success", message: "All escalation logs deleted." });
+      } catch (err) {
+        const message = err?.response?.data?.detail || err?.response?.data?.message || "Unable to delete escalation logs.";
+        setToast({ type: "error", message });
+      } finally {
+        setConfirmLoading(false);
+        setConfirmOpen(false);
+      }
+    });
+    setConfirmOpen(true);
+  };
+
   return (
     <AdminLayout>
       <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
@@ -122,6 +177,14 @@ export default function EscalationLogs() {
                 <option value={20}>20</option>
                 <option value={50}>50</option>
               </select>
+              <button
+                type="button"
+                onClick={openDeleteAllConfirm}
+                disabled={pagination.count === 0}
+                style={{ marginLeft: 8, border: "none", background: pagination.count === 0 ? "#fee2e2" : "linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)", color: pagination.count === 0 ? "#fca5a5" : "#fff", padding: "10px 14px", borderRadius: 12, cursor: pagination.count === 0 ? "not-allowed" : "pointer", fontWeight: 700 }}
+              >
+                Delete All Logs
+              </button>
             </div>
           </div>
 
@@ -137,7 +200,7 @@ export default function EscalationLogs() {
           ) : (
             <>
               <div style={{ overflowX: "auto", borderRadius: 16, border: "1px solid var(--border)" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", background: "transparent" }}>
                   <thead style={{ background: "#f8fafc" }}>
                     <tr>
                       <th style={{ padding: "12px 14px", textAlign: "left", fontSize: 12, color: "var(--muted)", textTransform: "uppercase" }}>SOS ID</th>
@@ -146,12 +209,13 @@ export default function EscalationLogs() {
                       <th style={{ padding: "12px 14px", textAlign: "left", fontSize: 12, color: "var(--muted)", textTransform: "uppercase" }}>Level</th>
                       <th style={{ padding: "12px 14px", textAlign: "left", fontSize: 12, color: "var(--muted)", textTransform: "uppercase" }}>Reason</th>
                       <th style={{ padding: "12px 14px", textAlign: "left", fontSize: 12, color: "var(--muted)", textTransform: "uppercase" }}>Created Time</th>
+                      <th style={{ padding: "12px 14px", textAlign: "center", fontSize: 12, color: "var(--muted)", textTransform: "uppercase" }}>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filteredLogs.length === 0 ? (
                       <tr>
-                        <td colSpan={6} style={{ padding: 20, textAlign: "center", color: "var(--muted)" }}>
+                        <td colSpan={7} style={{ padding: 20, textAlign: "center", color: "var(--muted)" }}>
                           No escalation logs match the current filters.
                         </td>
                       </tr>
@@ -164,10 +228,56 @@ export default function EscalationLogs() {
                           <td style={{ padding: "12px 14px" }}>{log.escalation_level?.replace(/_/g, " ") || "—"}</td>
                           <td style={{ padding: "12px 14px" }}>{log.escalation_reason || "—"}</td>
                           <td style={{ padding: "12px 14px", color: "var(--muted)" }}>{formatDateTime(log.timestamp || log.created_at)}</td>
+                          <td style={{ padding: "12px 14px", textAlign: "center" }}>
+                            <button
+                              onClick={() => openDeleteConfirm(log)}
+                              title="Delete"
+                              style={{ border: "none", background: "transparent", cursor: "pointer", color: "#dc2626" }}
+                            >
+                              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M3 6h18" stroke="#dc2626" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                <path d="M8 6v12a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2V6" stroke="#dc2626" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                <path d="M10 11v6" stroke="#dc2626" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                <path d="M14 11v6" stroke="#dc2626" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" stroke="#dc2626" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                              </svg>
+                            </button>
+                          </td>
                         </tr>
                       ))
                     )}
                   </tbody>
+                      {toast ? (
+                        <div
+                          style={{
+                            position: "fixed",
+                            top: 24,
+                            right: 24,
+                            zIndex: 1000,
+                            padding: "12px 14px",
+                            borderRadius: 12,
+                            background: toast.type === "error" ? "rgba(239,68,68,0.95)" : "rgba(22,163,74,0.95)",
+                            color: "#fff",
+                            boxShadow: "0 10px 24px rgba(15,23,42,0.18)",
+                            maxWidth: 360,
+                          }}
+                        >
+                          {toast.message}
+                        </div>
+                      ) : null}
+
+                      <ConfirmDialog
+                        isOpen={confirmOpen}
+                        title={confirmTitle}
+                        message={confirmMessage}
+                        onConfirm={() => {
+                          if (typeof confirmAction === "function") {
+                            confirmAction();
+                          }
+                        }}
+                        onCancel={() => setConfirmOpen(false)}
+                      />
+
                 </table>
               </div>
 
@@ -180,7 +290,7 @@ export default function EscalationLogs() {
                     type="button"
                     onClick={() => void loadLogs(page - 1)}
                     disabled={page <= 1}
-                    style={{ border: "1px solid var(--border)", borderRadius: 999, background: "#fff", padding: "8px 12px", cursor: page <= 1 ? "not-allowed" : "pointer", opacity: page <= 1 ? 0.6 : 1 }}
+                    style={{ border: "1px solid var(--border)", borderRadius: 999, background: "var(--surface-muted)", padding: "8px 12px", cursor: page <= 1 ? "not-allowed" : "pointer", opacity: page <= 1 ? 0.6 : 1 }}
                   >
                     Previous
                   </button>
@@ -188,7 +298,7 @@ export default function EscalationLogs() {
                     type="button"
                     onClick={() => void loadLogs(page + 1)}
                     disabled={page >= totalPages}
-                    style={{ border: "1px solid var(--border)", borderRadius: 999, background: "#fff", padding: "8px 12px", cursor: page >= totalPages ? "not-allowed" : "pointer", opacity: page >= totalPages ? 0.6 : 1 }}
+                    style={{ border: "1px solid var(--border)", borderRadius: 999, background: "var(--surface-muted)", padding: "8px 12px", cursor: page >= totalPages ? "not-allowed" : "pointer", opacity: page >= totalPages ? 0.6 : 1 }}
                   >
                     Next
                   </button>

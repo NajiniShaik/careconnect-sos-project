@@ -141,11 +141,14 @@ export function markAuthenticatedSession() {
   REGISTRATION_STATE.loggedOut = false;
 }
 
-export function cleanupOnLogout() {
+export async function cleanupOnLogout() {
   REGISTRATION_STATE.loggedOut = true;
   REGISTRATION_STATE.lastRegisteredToken = null;
   REGISTRATION_STATE.lastRegisteredUserId = null;
   REGISTRATION_STATE.lastRegisteredUserRole = null;
+  await unregisterDeviceFromBackend().catch(() => {});
+  await clearRegisteredDeviceToken();
+  await clearPendingDeviceToken();
   clearNotificationState();
 }
 
@@ -305,20 +308,40 @@ export async function getNotificationPermissionStatus() {
 }
 
 export async function getDevicePushTokenAsync() {
-  if (IS_EXPO_GO) return null;
-  if (isWeb()) return null;
-  if (!Device.isDevice) return null;
+  const runtimeInfo = {
+    isExpoGo: IS_EXPO_GO,
+    isWeb: isWeb(),
+    isDevice: Device.isDevice,
+    osName: Device.osName,
+    platformOS: Platform.OS,
+  };
+
+  if (IS_EXPO_GO) {
+    console.log("[notification] skipping push token generation because Expo Go is in use", runtimeInfo);
+    return null;
+  }
+  if (isWeb()) {
+    console.log("[notification] skipping push token generation because the app is running on web", runtimeInfo);
+    return null;
+  }
+  if (!Device.isDevice) {
+    console.log("[notification] skipping push token generation because the runtime is not a physical device", runtimeInfo);
+    return null;
+  }
 
   try {
     if (typeof Notifications.getDevicePushTokenAsync !== "function") {
+      console.log("[notification] getDevicePushTokenAsync is not available in this runtime", runtimeInfo);
       return null;
     }
 
     const tokenData = await Notifications.getDevicePushTokenAsync();
-    return tokenData?.data || null;
+    const resolvedToken = tokenData?.data || null;
+    console.log("[notification] resolved push token", { ...runtimeInfo, token: resolvedToken ? `${resolvedToken.slice(0, 8)}...` : null });
+    return resolvedToken;
   } catch (err) {
     if (__DEV__) {
-      console.log("[notification] getDevicePushTokenAsync failed", err);
+      console.log("[notification] getDevicePushTokenAsync failed", { ...runtimeInfo, error: err });
     }
     return null;
   }
@@ -402,6 +425,42 @@ async function getRegisteredDeviceToken() {
   }
 }
 
+async function clearRegisteredDeviceToken() {
+  try {
+    await SecureStore.deleteItemAsync(REGISTERED_DEVICE_TOKEN_KEY);
+  } catch (error) {
+    if (__DEV__) {
+      console.log("[notification] clearRegisteredDeviceToken failed", error);
+    }
+  }
+}
+
+async function unregisterDeviceFromBackend(token = null) {
+  try {
+    const registrationRecord = await getRegisteredDeviceToken();
+    const resolvedToken = token || registrationRecord?.token;
+    if (!resolvedToken) {
+      return { skipped: true, reason: "missing-token" };
+    }
+
+    const authToken = await getStoredToken();
+    if (!authToken) {
+      return { skipped: true, reason: "not-authenticated" };
+    }
+
+    const headers = await getAuthHeaders(authToken);
+    await api.delete(`/notifications/register-device/`, { headers, params: { token: resolvedToken } });
+    await clearRegisteredDeviceToken();
+    await clearPendingDeviceToken();
+    return { success: true, token: resolvedToken };
+  } catch (err) {
+    if (__DEV__) {
+      console.log("[notification] unregisterDeviceFromBackend failed", err?.response?.data || err);
+    }
+    return { skipped: true, reason: "failed", error: err?.message || String(err) };
+  }
+}
+
 async function setRegisteredDeviceToken(token, userInfo = null) {
   try {
     const currentUser = userInfo || (await getStoredUser());
@@ -472,7 +531,19 @@ export async function registerDeviceWithBackend({ token, platform, device_id }) 
     return { skipped: true };
   }
 
-  if (!token) {
+  const normalizedToken = typeof token === "string" ? token.trim() : "";
+  if (!normalizedToken) {
+    const runtimeInfo = {
+      isExpoGo: IS_EXPO_GO,
+      isWeb: isWeb(),
+      isDevice: Device.isDevice,
+      osName: Device.osName,
+      platformOS: Platform.OS,
+      token,
+      platform,
+      device_id,
+    };
+    console.error("[notification] refusing to register because the device token is blank", runtimeInfo);
     throw new Error("Missing device token");
   }
 
@@ -513,13 +584,21 @@ export async function registerDeviceWithBackend({ token, platform, device_id }) 
       return { skipped: true, reason: "missing-auth-header" };
     }
 
-    const resp = await api.post(`/notifications/register-device/`, { device_token: token }, { headers });
+    const normalizedPlatform = (typeof platform === "string" && platform ? String(platform) : (Device.osName || Platform.OS || "unknown")).toLowerCase();
+    const payload = { device_token: normalizedToken, platform: normalizedPlatform, device_id };
+    console.log("[notification] posting device registration payload", payload);
 
-    REGISTRATION_STATE.lastRegisteredToken = token;
+    const resp = await api.post(
+      `/notifications/register-device/`,
+      payload,
+      { headers }
+    );
+
+    REGISTRATION_STATE.lastRegisteredToken = normalizedToken;
     REGISTRATION_STATE.lastRegisteredUserId = currentUserId;
     REGISTRATION_STATE.lastRegisteredUserRole = currentRole;
 
-    await setRegisteredDeviceToken(token, currentUser);
+    await setRegisteredDeviceToken(normalizedToken, currentUser);
     await clearPendingDeviceToken();
     return resp.data;
   } catch (err) {
@@ -567,6 +646,14 @@ export async function ensureDeviceRegistration() {
   }
 
   const deviceToken = await getDevicePushTokenAsync();
+  console.log("[notification] ensureDeviceRegistration runtime", {
+    isExpoGo: IS_EXPO_GO,
+    isWeb: isWeb(),
+    isDevice: Device.isDevice,
+    osName: Device.osName,
+    platformOS: Platform.OS,
+    deviceToken: deviceToken ? `${deviceToken.slice(0, 8)}...` : null,
+  });
   if (!deviceToken) {
     return { skipped: true, reason: "missing-token" };
   }

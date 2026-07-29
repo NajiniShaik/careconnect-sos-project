@@ -84,7 +84,7 @@ export default function ResidentForm({
 
         <div>
           <label style={{ display: "block", marginBottom: "6px", fontWeight: 700, color: "#0f172a" }}>Society</label>
-          <select name="society" value={formData.society} onChange={handleChange} required style={{ width: "100%", padding: "11px 12px", borderRadius: "12px", border: "1px solid #cbd5e1", boxSizing: "border-box", background: "#fff" }}>
+          <select name="society" value={formData.society} onChange={handleChange} required style={{ width: "100%", padding: "11px 12px", borderRadius: "12px", border: "1px solid var(--border)", boxSizing: "border-box", background: "var(--input-bg)" }}>
             <option value="">Select Society</option>
             {societies.map((society) => (
               <option key={society.id} value={society.id}>{society.name}</option>
@@ -94,7 +94,7 @@ export default function ResidentForm({
 
         <div>
           <label style={{ display: "block", marginBottom: "6px", fontWeight: 700, color: "#0f172a" }}>Block</label>
-          <select name="block" value={formData.block} onChange={handleChange} required disabled={!formData.society} style={{ width: "100%", padding: "11px 12px", borderRadius: "12px", border: "1px solid #cbd5e1", boxSizing: "border-box", background: "#fff" }}>
+          <select name="block" value={formData.block} onChange={handleChange} required disabled={!formData.society} style={{ width: "100%", padding: "11px 12px", borderRadius: "12px", border: "1px solid var(--border)", boxSizing: "border-box", background: "var(--input-bg)" }}>
             <option value="">Select Block</option>
             {filteredBlocks.map((block) => (
               <option key={block.id} value={block.id}>{block.name}</option>
@@ -104,7 +104,7 @@ export default function ResidentForm({
 
         <div>
           <label style={{ display: "block", marginBottom: "6px", fontWeight: 700, color: "#0f172a" }}>Flat</label>
-          <select name="flat" value={formData.flat} onChange={handleChange} required disabled={!formData.block} style={{ width: "100%", padding: "11px 12px", borderRadius: "12px", border: "1px solid #cbd5e1", boxSizing: "border-box", background: "#fff" }}>
+          <select name="flat" value={formData.flat} onChange={handleChange} required disabled={!formData.block} style={{ width: "100%", padding: "11px 12px", borderRadius: "12px", border: "1px solid var(--border)", boxSizing: "border-box", background: "var(--input-bg)" }}>
             <option value="">Select Flat</option>
             {filteredFlats.map((flat) => (
               <option key={flat.id} value={flat.id}>{flat.flat_number}</option>
@@ -114,7 +114,7 @@ export default function ResidentForm({
       </div>
 
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 20 }}>
-        <button type="button" onClick={onCancel} style={{ border: "1px solid #cbd5e1", background: "#fff", borderRadius: "999px", padding: "10px 14px", cursor: "pointer", color: "#0f172a", fontWeight: 700 }}>
+        <button type="button" onClick={onCancel} style={{ border: "1px solid var(--border)", background: "var(--surface-muted)", borderRadius: "999px", padding: "10px 14px", cursor: "pointer", color: "var(--text)", fontWeight: 700 }}>
           Cancel
         </button>
         <button type="submit" style={{ border: "none", background: "linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)", borderRadius: "999px", padding: "10px 14px", cursor: "pointer", color: "#fff", fontWeight: 700 }}>

@@ -14,6 +14,8 @@ from .serializers import NotificationDeliverySerializer
 from sos.models import SOS
 from .models import DeviceToken, Notification, NotificationDelivery, EscalationConfiguration, EscalationLog
 from .serializers import RegisterDeviceSerializer, EscalationConfigurationSerializer, EscalationLogSerializer
+from .serializers import NotificationTemplateSerializer
+from .models import NotificationTemplate
 from .tasks import process_community_broadcast_task
 from .community_broadcast import CommunityBroadcastService
 
@@ -24,9 +26,14 @@ class RegisterDeviceView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        logger.info("RegisterDeviceView request data: %s", request.data)
         serializer = RegisterDeviceSerializer(data=request.data)
-        if not serializer.is_valid():
+        is_valid = serializer.is_valid()
+        logger.info("RegisterDeviceView serializer is_valid=%s errors=%s", is_valid, serializer.errors)
+        if not is_valid:
             return Response({"success": False, "message": "Invalid data", "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+        logger.info("RegisterDeviceView validated data: %s", serializer.validated_data)
 
         device_token = serializer.validated_data.get("device_token")
         if not device_token:
@@ -190,6 +197,25 @@ class EscalationLogListView(APIView):
         serializer = EscalationLogSerializer(page, many=True)
         return paginator.get_paginated_response(serializer.data)
 
+    def delete(self, request):
+        # Delete all escalation logs. Keep permission restricted to Admins via permission_classes
+        try:
+            # Allow optional filters to restrict deletion (mirrors GET filters)
+            queryset = EscalationLog.objects.all()
+            escalation_level = request.query_params.get("escalation_level")
+            if escalation_level:
+                queryset = queryset.filter(escalation_level=escalation_level)
+
+            sos_id = request.query_params.get("sos")
+            if sos_id:
+                queryset = queryset.filter(sos_id=sos_id)
+
+            deleted_count, _ = queryset.delete()
+            return Response({"success": True, "deleted": deleted_count, "message": "Escalation logs deleted."}, status=status.HTTP_200_OK)
+        except Exception as exc:
+            logger.exception("Failed to delete escalation logs: %s", exc)
+            return Response({"success": False, "message": "Unable to delete escalation logs."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 class EscalationLogDetailView(APIView):
     permission_classes = [IsAuthenticated, IsAdmin]
@@ -201,6 +227,19 @@ class EscalationLogDetailView(APIView):
             return Response({"detail": "Escalation log not found"}, status=status.HTTP_404_NOT_FOUND)
         serializer = EscalationLogSerializer(log)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def delete(self, request, pk):
+        try:
+            log = EscalationLog.objects.get(pk=pk)
+        except EscalationLog.DoesNotExist:
+            return Response({"detail": "Escalation log not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            log.delete()
+            return Response({"success": True, "message": "Escalation log deleted."}, status=status.HTTP_200_OK)
+        except Exception as exc:
+            logger.exception("Failed to delete escalation log %s: %s", pk, exc)
+            return Response({"success": False, "message": "Unable to delete escalation log."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class EscalationConfigurationView(APIView):
@@ -299,6 +338,129 @@ class NotificationListView(APIView):
                 }
             )
         return Response(data, status=status.HTTP_200_OK)
+
+
+class NotificationTemplateListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        # Only admins should normally view templates in this app, but allow authenticated users to GET
+        templates = NotificationTemplate.objects.filter(is_active=True).order_by("template_key")
+        serializer = NotificationTemplateSerializer(templates, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        # create new template (Admin only)
+        role = str(getattr(request.user, "role", "") or "").upper()
+        if role != "ADMIN":
+            return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+
+        serializer = NotificationTemplateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class NotificationTemplateDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get_object(self, key):
+        try:
+            return NotificationTemplate.objects.get(template_key=key)
+        except NotificationTemplate.DoesNotExist:
+            return None
+
+    def get(self, request, key):
+        obj = self.get_object(key)
+        if not obj:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        serializer = NotificationTemplateSerializer(obj)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def put(self, request, key):
+        role = str(getattr(request.user, "role", "") or "").upper()
+        if role != "ADMIN":
+            return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+        obj = self.get_object(key)
+        if not obj:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        serializer = NotificationTemplateSerializer(obj, data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def patch(self, request, key):
+        role = str(getattr(request.user, "role", "") or "").upper()
+        if role != "ADMIN":
+            return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+        obj = self.get_object(key)
+        if not obj:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        serializer = NotificationTemplateSerializer(obj, data=request.data, partial=True)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def delete(self, request, key):
+        role = str(getattr(request.user, "role", "") or "").upper()
+        if role != "ADMIN":
+            return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+        obj = self.get_object(key)
+        if not obj:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        obj.delete()
+        return Response({"success": True}, status=status.HTTP_200_OK)
+
+
+class ResetNotificationTemplatesView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        role = str(getattr(request.user, "role", "") or "").upper()
+        if role != "ADMIN":
+            return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+
+        defaults = [
+            {"template_key": "sos_created", "name": "SOS Created", "channel": "PUSH", "subject": "SOS Created: {{incident_id}}", "title": "SOS Created", "body": "SOS reported by {{resident_name}}"},
+            {"template_key": "sos_accepted", "name": "SOS Accepted", "channel": "PUSH", "subject": "SOS Accepted: {{incident_id}}", "title": "SOS Accepted", "body": "SOS accepted by {{volunteer_name}}"},
+            {"template_key": "sos_resolved", "name": "SOS Resolved", "channel": "PUSH", "subject": "SOS Resolved: {{incident_id}}", "title": "SOS Resolved", "body": "SOS resolved for {{resident_name}}"},
+            {"template_key": "escalation", "name": "Escalation", "channel": "SMS", "subject": "Escalation: {{incident_id}}", "title": "Escalation", "body": "Escalation notification: {{severity}}"},
+            {"template_key": "emergency_contact_alert", "name": "Emergency Contact Alert", "channel": "SMS", "subject": "Emergency Contact Alert", "title": "Verify Contact", "body": "Please verify emergency contact for {{resident_name}}"},
+            {"template_key": "community_broadcast", "name": "Community Broadcast", "channel": "EMAIL", "subject": "Community Broadcast", "title": "Community Broadcast", "body": "Community broadcast: {{category}} at {{address}}"},
+        ]
+
+        NotificationTemplate.objects.all().delete()
+        created = []
+        for item in defaults:
+            obj = NotificationTemplate.objects.create(
+                template_key=item["template_key"],
+                name=item["name"],
+                channel=item.get("channel", "EMAIL"),
+                subject=item.get("subject", ""),
+                title=item.get("title", ""),
+                body=item.get("body", ""),
+            )
+            created.append(obj)
+
+        serializer = NotificationTemplateSerializer(created, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def delete(self, request):
+        """Delete all notification records. Admins only."""
+        role = str(getattr(request.user, "role", "") or "").upper()
+        if role != "ADMIN":
+            return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            # Only delete Notification model records. Do not touch templates or related models.
+            deleted_count, _ = Notification.objects.all().delete()
+            return Response({"success": True, "deleted": deleted_count, "message": "Notification logs deleted."}, status=status.HTTP_200_OK)
+        except Exception as exc:
+            logger.exception("Failed to delete notification logs: %s", exc)
+            return Response({"success": False, "message": "Unable to delete notification logs."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class MarkNotificationReadView(APIView):

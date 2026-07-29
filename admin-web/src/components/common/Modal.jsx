@@ -20,13 +20,13 @@ export default function Modal({
             }}
         >
             <div
+                className="glass-panel"
                 style={{
                     width: "100%",
                     maxWidth: "560px",
-                    background: "#fff",
                     borderRadius: "18px",
                     padding: "24px",
-                    boxShadow: "0 20px 45px rgba(15, 23, 42, 0.18)",
+                    boxShadow: "var(--glass-shadow)",
                 }}
             >
                 <div
@@ -37,19 +37,19 @@ export default function Modal({
                         marginBottom: "18px",
                     }}
                 >
-                    <h2 style={{ margin: 0, fontSize: "20px", color: "#0f172a" }}>{title}</h2>
+                    <h2 style={{ margin: 0, fontSize: "20px", color: "var(--text)" }}>{title}</h2>
 
                     <button
                         onClick={onClose}
                         style={{
                             border: "none",
-                            background: "#f1f5f9",
+                            background: "var(--surface-muted)",
                             borderRadius: "999px",
                             width: "36px",
                             height: "36px",
                             fontSize: "18px",
                             cursor: "pointer",
-                            color: "#475569",
+                            color: "var(--muted)",
                         }}
                     >
                         ✕

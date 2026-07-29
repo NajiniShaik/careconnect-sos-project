@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import AdminLayout from "../components/common/AdminLayout";
+import ConfirmDialog from "../components/common/ConfirmDialog";
 import NotificationTemplatesPanel from "../components/notifications/NotificationTemplatesPanel";
 import axios from "axios";
 
@@ -68,6 +69,29 @@ export default function Notifications({ initialTab = "logs" }) {
     }
   };
 
+  const [deleteAllOpen, setDeleteAllOpen] = useState(false);
+  const [deleteAllLoading, setDeleteAllLoading] = useState(false);
+  const [toast, setToast] = useState(null);
+
+  const deleteAllNotifications = async () => {
+    setDeleteAllLoading(true);
+    setError("");
+    try {
+      await axios.delete(`${API}/notifications/`, { headers: getAuthHeaders() });
+      await loadItems();
+      setToast({ type: "success", message: "All notification logs deleted." });
+    } catch (err) {
+      console.error("Failed to delete all notifications", err);
+      setError("Unable to delete notification logs.");
+      setToast({ type: "error", message: "Failed to delete notification logs." });
+    } finally {
+      setDeleteAllLoading(false);
+      setDeleteAllOpen(false);
+      // clear toast after a short delay
+      setTimeout(() => setToast(null), 3500);
+    }
+  };
+
   const unreadCount = useMemo(() => items.filter((item) => !item.read).length, [items]);
   const [createTemplateSignal, setCreateTemplateSignal] = useState(0);
 
@@ -75,9 +99,7 @@ export default function Notifications({ initialTab = "logs" }) {
   const navigate = useNavigate();
   const activeTab = activePath.startsWith("/notifications/templates") ? "templates" : "logs";
   const titleText = activeTab === "templates" ? "Notification Templates" : "Notification Logs";
-  const subtitleText = activeTab === "templates"
-    ? "Manage notification templates for email, SMS, and push notifications."
-    : "Review recent notification activity and delivery status.";
+  const subtitleText = "";
 
   const formatDateTime = (value) => {
     if (!value) return "–";
@@ -94,12 +116,12 @@ export default function Notifications({ initialTab = "logs" }) {
   const getDeliveryBadgeStyle = (status) => {
     const normalized = String(status || "").toLowerCase();
     if (normalized === "failed") {
-      return { background: "#fef2f2", color: "#b91c1c", border: "1px solid #fecaca" };
+      return { background: "rgba(239, 68, 68, 0.16)", color: "var(--danger)", border: "1px solid rgba(239, 68, 68, 0.3)" };
     }
     if (normalized === "pending") {
-      return { background: "#fef3c7", color: "#b45309", border: "1px solid #fde68a" };
+      return { background: "rgba(245, 158, 11, 0.16)", color: "var(--warning)", border: "1px solid rgba(245, 158, 11, 0.3)" };
     }
-    return { background: "#ecfdf3", color: "#15803d", border: "1px solid #a7f3d0" };
+    return { background: "rgba(16, 185, 129, 0.16)", color: "var(--success)", border: "1px solid rgba(16, 185, 129, 0.3)" };
   };
 
   const handleDeleteNotification = async (item) => {
@@ -125,18 +147,18 @@ export default function Notifications({ initialTab = "logs" }) {
       <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}>
           <div>
-            <div style={{ fontSize: 28, fontWeight: 800, color: "#0f172a" }}>{titleText}</div>
-            <div style={{ marginTop: 6, fontSize: 14, color: "#64748b" }}>{subtitleText}</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: "var(--text)" }}>{titleText}</div>
+            {subtitleText ? <div style={{ marginTop: 6, fontSize: 14, color: "var(--text-secondary)" }}>{subtitleText}</div> : null}
           </div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
             <button
               type="button"
               onClick={() => navigate("/notifications/logs")}
               style={{
-                border: "1px solid #e2e8f0",
+                border: "1px solid var(--border)",
                 borderRadius: 999,
-                background: activePath === "/notifications/logs" ? "rgba(37, 99, 235, 0.12)" : "white",
-                color: activePath === "/notifications/logs" ? "#1d4ed8" : "#334155",
+                background: activePath === "/notifications/logs" ? "var(--chip-bg)" : "var(--surface-muted)",
+                color: activePath === "/notifications/logs" ? "var(--chip-text)" : "var(--text)",
                 padding: "10px 18px",
                 cursor: "pointer",
                 fontWeight: activePath === "/notifications/logs" ? 700 : 600,
@@ -149,10 +171,10 @@ export default function Notifications({ initialTab = "logs" }) {
                 type="button"
                 onClick={() => navigate("/notifications/templates")}
                 style={{
-                  border: "1px solid #e2e8f0",
+                  border: "1px solid var(--border)",
                   borderRadius: 999,
-                  background: activePath === "/notifications/templates" ? "rgba(37, 99, 235, 0.12)" : "white",
-                  color: activePath === "/notifications/templates" ? "#1d4ed8" : "#334155",
+                  background: activePath === "/notifications/templates" ? "var(--chip-bg)" : "var(--surface-muted)",
+                  color: activePath === "/notifications/templates" ? "var(--chip-text)" : "var(--text)",
                   padding: "10px 18px",
                   cursor: "pointer",
                   fontWeight: activePath === "/notifications/templates" ? 700 : 600,
@@ -168,8 +190,8 @@ export default function Notifications({ initialTab = "logs" }) {
                 style={{
                   border: "none",
                   borderRadius: 999,
-                  background: "#2563eb",
-                  color: "#ffffff",
+                  background: "var(--primary)",
+                  color: "var(--button-text)",
                   padding: "10px 18px",
                   cursor: "pointer",
                   fontWeight: 700,
@@ -187,10 +209,9 @@ export default function Notifications({ initialTab = "logs" }) {
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                 <div>
-                  <div style={{ fontSize: 16, color: "#475569", fontWeight: 600 }}>
+                  <div style={{ fontSize: 16, color: "var(--text-secondary)", fontWeight: 600 }}>
                     {unreadCount > 0 ? `${unreadCount} unread notification${unreadCount === 1 ? "" : "s"}` : "All caught up"}
                   </div>
-                  <div style={{ marginTop: 4, fontSize: 13, color: "#64748b" }}>Refresh for new SOS email and SMS notifications as they appear.</div>
                 </div>
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                   <button
@@ -198,10 +219,10 @@ export default function Notifications({ initialTab = "logs" }) {
                     onClick={() => void loadItems()}
                     disabled={loading}
                     style={{
-                      border: "1px solid #e2e8f0",
+                      border: "1px solid var(--border)",
                       borderRadius: 999,
-                      background: "white",
-                      color: "#334155",
+                      background: "var(--surface-muted)",
+                      color: "var(--text)",
                       padding: "10px 18px",
                       cursor: loading ? "not-allowed" : "pointer",
                       opacity: loading ? 0.65 : 1,
@@ -218,8 +239,8 @@ export default function Notifications({ initialTab = "logs" }) {
                       border: "none",
                       borderRadius: 12,
                       padding: "10px 16px",
-                      background: "#2563eb",
-                      color: "white",
+                      background: "var(--primary)",
+                      color: "var(--button-text)",
                       cursor: loading || items.length === 0 ? "not-allowed" : "pointer",
                       opacity: loading || items.length === 0 ? 0.65 : 1,
                       fontWeight: 700,
@@ -227,23 +248,40 @@ export default function Notifications({ initialTab = "logs" }) {
                   >
                     Mark all read
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setDeleteAllOpen(true)}
+                    disabled={items.length === 0 || loading}
+                    style={{
+                      border: "none",
+                      borderRadius: 12,
+                      padding: "10px 16px",
+                      background: items.length === 0 || loading ? "rgba(239, 68, 68, 0.18)" : "linear-gradient(135deg, var(--danger) 0%, #b91c1c 100%)",
+                      color: "var(--button-text)",
+                      cursor: items.length === 0 || loading ? "not-allowed" : "pointer",
+                      opacity: items.length === 0 || loading ? 0.7 : 1,
+                      fontWeight: 700,
+                    }}
+                  >
+                    {deleteAllLoading ? "Deleting..." : "Delete All Logs"}
+                  </button>
                 </div>
               </div>
 
               {error ? (
-                <div style={{ padding: 14, borderRadius: 14, background: "#fef2f2", color: "#b91c1c", border: "1px solid #fecaca" }}>{error}</div>
+                <div style={{ padding: 14, borderRadius: 14, background: "rgba(239, 68, 68, 0.14)", color: "var(--danger)", border: "1px solid rgba(239, 68, 68, 0.3)" }}>{error}</div>
               ) : null}
 
               {loading ? (
-                <div style={{ padding: 16, color: "#64748b" }}>Loading notification history…</div>
+                <div style={{ padding: 16, color: "var(--text-muted)" }}>Loading notification history…</div>
               ) : items.length === 0 ? (
-                <div style={{ padding: 24, borderRadius: 16, background: "#fff", color: "#64748b", textAlign: "center" }}>
+                <div className="glass-panel" style={{ padding: 24, borderRadius: 16, color: "var(--text-muted)", textAlign: "center" }}>
                   No notifications have been recorded yet.
                 </div>
               ) : (
-                <div style={{ overflowX: "auto", borderRadius: 18, border: "1px solid #e2e8f0", background: "#fff" }}>
+                <div className="glass-panel" style={{ overflowX: "auto", borderRadius: 18, background: "var(--surface-glass)", border: "1px solid var(--glass-border)" }}>
                   <div style={{ minWidth: 1380 }}>
-                    <div style={{ display: "grid", gridTemplateColumns: "1.1fr 1.1fr 1fr 0.9fr 1fr 1.2fr 1.4fr 0.8fr", gap: 0, padding: "16px 18px", fontSize: 12, fontWeight: 700, color: "#475569", textTransform: "uppercase", borderBottom: "1px solid #e2e8f0" }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "1.1fr 1.1fr 1fr 0.9fr 1fr 1.2fr 1.4fr 0.8fr", gap: 0, padding: "16px 18px", fontSize: 12, fontWeight: 700, color: "var(--text-secondary)", textTransform: "uppercase", borderBottom: "1px solid var(--border)", background: "transparent" }}>
                       <div>Notification</div>
                       <div>Channel</div>
                       <div>Recipient</div>
@@ -272,15 +310,15 @@ export default function Notifications({ initialTab = "logs" }) {
                             alignItems: "start",
                             gap: 0,
                             padding: "16px 18px",
-                            borderBottom: "1px solid #f1f5f9",
-                            background: item.read ? "white" : "#eff6ff",
-                            color: "#334155",
+                            borderBottom: "1px solid var(--border)",
+                            background: item.read ? "transparent" : "var(--chip-bg)",
+                            color: "var(--text)",
                           }}
                         >
-                          <div style={{ fontSize: 13, color: "#0f172a" }}>
+                          <div style={{ fontSize: 13, color: "var(--text)" }}>
                             <div style={{ fontWeight: 700 }}>{title}</div>
-                            <div style={{ marginTop: 4, color: "#64748b", whiteSpace: "normal", wordBreak: "break-word" }}>{message}</div>
-                            <div style={{ marginTop: 6, fontSize: 12, color: "#64748b" }}>From: {sender}</div>
+                            <div style={{ marginTop: 4, color: "var(--text-secondary)", whiteSpace: "normal", wordBreak: "break-word" }}>{message}</div>
+                            <div style={{ marginTop: 6, fontSize: 12, color: "var(--text-muted)" }}>From: {sender}</div>
                           </div>
                           <div style={{ fontSize: 13 }}>{channel}</div>
                           <div style={{ fontSize: 13 }}>
@@ -288,8 +326,8 @@ export default function Notifications({ initialTab = "logs" }) {
                               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                                 {deliveries.map((delivery, deliveryIndex) => (
                                   <div key={`${item.id}-${deliveryIndex}`} style={{ fontSize: 12 }}>
-                                    <div style={{ fontWeight: 600, color: "#0f172a" }}>{delivery.recipient_name || delivery.recipient || recipient}</div>
-                                    <div style={{ color: "#64748b" }}>{delivery.recipient || recipient}</div>
+                                    <div style={{ fontWeight: 600, color: "var(--text)" }}>{delivery.recipient_name || delivery.recipient || recipient}</div>
+                                    <div style={{ color: "var(--text-muted)" }}>{delivery.recipient || recipient}</div>
                                   </div>
                                 ))}
                               </div>
@@ -297,11 +335,11 @@ export default function Notifications({ initialTab = "logs" }) {
                               recipient
                             )}
                           </div>
-                          <div style={{ fontSize: 13 }}>
-                            {deliveries.length > 0 ? deliveries.map((delivery, deliveryIndex) => <div key={`${item.id}-role-${deliveryIndex}`} style={{ fontSize: 12, color: "#64748b", marginBottom: deliveryIndex === deliveries.length - 1 ? 0 : 6 }}>{delivery.recipient_role || "—"}</div>) : "—"}
+                          <div style={{ fontSize: 13, color: "var(--muted)" }}>
+                            {deliveries.length > 0 ? deliveries.map((delivery, deliveryIndex) => <div key={`${item.id}-role-${deliveryIndex}`} style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: deliveryIndex === deliveries.length - 1 ? 0 : 6 }}>{delivery.recipient_role || "—"}</div>) : "—"}
                           </div>
-                          <div style={{ fontSize: 13 }}>
-                            {deliveries.length > 0 ? deliveries.map((delivery, deliveryIndex) => <div key={`${item.id}-address-${deliveryIndex}`} style={{ fontSize: 12, color: "#64748b", marginBottom: deliveryIndex === deliveries.length - 1 ? 0 : 6 }}>{delivery.recipient_address || "—"}</div>) : "—"}
+                          <div style={{ fontSize: 13, color: "var(--muted)" }}>
+                            {deliveries.length > 0 ? deliveries.map((delivery, deliveryIndex) => <div key={`${item.id}-address-${deliveryIndex}`} style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: deliveryIndex === deliveries.length - 1 ? 0 : 6 }}>{delivery.recipient_address || "—"}</div>) : "—"}
                           </div>
                           <div style={{ fontSize: 13 }}>
                             {deliveries.length > 0 ? (
@@ -316,7 +354,7 @@ export default function Notifications({ initialTab = "logs" }) {
                               <span style={{ ...getDeliveryBadgeStyle(status), display: "inline-block", padding: "4px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700 }}>{status}</span>
                             )}
                           </div>
-                          <div style={{ fontSize: 13, color: "#64748b" }}>
+                          <div style={{ fontSize: 13, color: "var(--muted)" }}>
                             {deliveries.length > 0 ? deliveries.map((delivery, deliveryIndex) => <div key={`${item.id}-time-${deliveryIndex}`} style={{ fontSize: 12, marginBottom: deliveryIndex === deliveries.length - 1 ? 0 : 6 }}>{formatDateTime(delivery.timestamp)}</div>) : timestamp}
                           </div>
                           <div style={{ display: "flex", justifyContent: "flex-end" }}>
@@ -328,10 +366,10 @@ export default function Notifications({ initialTab = "logs" }) {
                               }}
                               disabled={!canDelete}
                               style={{
-                                border: "1px solid #f1f5f9",
+                                border: "1px solid var(--border)",
                                 borderRadius: 8,
-                                background: canDelete ? "#fff1f2" : "#f8fafc",
-                                color: canDelete ? "#b91c1c" : "#94a3b8",
+                                background: canDelete ? "rgba(239,68,68,0.14)" : "var(--surface-muted)",
+                                color: canDelete ? "#fda4af" : "var(--text-muted)",
                                 padding: "8px 10px",
                                 cursor: canDelete ? "pointer" : "not-allowed",
                                 fontWeight: 600,
@@ -347,6 +385,34 @@ export default function Notifications({ initialTab = "logs" }) {
                   </div>
                 </div>
               )}
+              {toast ? (
+                <div
+                  style={{
+                    position: "fixed",
+                    top: 24,
+                    right: 24,
+                    zIndex: 1000,
+                    padding: "12px 14px",
+                    borderRadius: 12,
+                    background: toast.type === "error" ? "rgba(239,68,68,0.95)" : "rgba(22,163,74,0.95)",
+                    color: "var(--button-text)",
+                    boxShadow: "0 10px 24px rgba(15,23,42,0.18)",
+                    maxWidth: 360,
+                  }}
+                >
+                  {toast.message}
+                </div>
+              ) : null}
+
+              <ConfirmDialog
+                isOpen={deleteAllOpen}
+                title={"Delete All Notification Logs"}
+                message={"This will permanently delete ALL notification logs. This action cannot be undone."}
+                onConfirm={() => void deleteAllNotifications()}
+                onCancel={() => setDeleteAllOpen(false)}
+                confirmLabel={"Delete All"}
+                confirmLoading={deleteAllLoading}
+              />
             </div>
           } />
           <Route path="templates" element={isAdmin ? <NotificationTemplatesPanel createTemplateSignal={createTemplateSignal} /> : <Navigate to="/notifications/logs" replace />} />

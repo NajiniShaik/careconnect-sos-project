@@ -40,7 +40,7 @@ function Toggle({ checked, onChange, disabled = false }) {
           width: 22,
           height: 22,
           borderRadius: "50%",
-          background: "#fff",
+          background: "var(--surface-glass)",
           transform: checked ? "translateX(22px)" : "translateX(2px)",
           transition: "transform 0.2s ease",
           margin: "3px",

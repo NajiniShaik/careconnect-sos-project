@@ -1,0 +1,43 @@
+/* Responsive analytics grid for Dashboard */
+.analytics-top {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+  align-items: stretch;
+}
+
+.analytics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(320px, 1fr));
+  gap: 16px;
+  align-items: stretch;
+  grid-auto-rows: 1fr;
+}
+
+.analytics-card {
+  display: flex;
+  min-height: 360px;
+  align-items: stretch;
+}
+
+.analytics-card > .chart-card {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.chart-card {
+  width: 100%;
+}
+
+@media (max-width: 1120px) {
+  .analytics-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 840px) {
+  .analytics-top {
+    grid-template-columns: 1fr;
+  }
+}
