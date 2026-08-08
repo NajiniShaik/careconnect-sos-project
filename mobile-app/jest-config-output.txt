@@ -1,0 +1,191 @@
+{
+  "configs": [
+    {
+      "automock": false,
+      "cache": true,
+      "cacheDirectory": "C:\\Users\\NAJINI\\AppData\\Local\\Temp\\jest",
+      "clearMocks": false,
+      "collectCoverageFrom": [],
+      "coverageDirectory": "D:\\careconnect\\mobile-app\\coverage",
+      "coveragePathIgnorePatterns": [
+        "\\\\node_modules\\\\"
+      ],
+      "cwd": "D:\\careconnect\\mobile-app",
+      "detectLeaks": false,
+      "detectOpenHandles": false,
+      "errorOnDeprecated": false,
+      "extensionsToTreatAsEsm": [],
+      "fakeTimers": {
+        "enableGlobally": false
+      },
+      "forceCoverageMatch": [],
+      "globals": {},
+      "haste": {
+        "defaultPlatform": "ios",
+        "platforms": [
+          "android",
+          "ios",
+          "native"
+        ]
+      },
+      "id": "db4eb091bf00a47f8402922c6682805b",
+      "injectGlobals": true,
+      "moduleDirectories": [
+        "node_modules"
+      ],
+      "moduleFileExtensions": [
+        "js",
+        "jsx",
+        "ts",
+        "tsx",
+        "json"
+      ],
+      "moduleNameMapper": [
+        [
+          "^@/(.*)$",
+          "D:\\careconnect\\mobile-app\\src\\$1"
+        ],
+        [
+          "^@/assets/(.*)$",
+          "D:\\careconnect\\mobile-app\\assets\\$1"
+        ],
+        [
+          "^react-native($|/.*)",
+          "D:\\careconnect\\mobile-app\\node_modules\\react-native/$1"
+        ],
+        [
+          "^react-native-vector-icons$",
+          "@expo/vector-icons"
+        ],
+        [
+          "^react-native-vector-icons/(.*)",
+          "@expo/vector-icons/$1"
+        ]
+      ],
+      "modulePathIgnorePatterns": [],
+      "openHandlesTimeout": 1000,
+      "prettierPath": "prettier",
+      "resetMocks": false,
+      "resetModules": false,
+      "resolver": "D:\\careconnect\\mobile-app\\node_modules\\expo-module-scripts\\node_modules\\@react-native\\jest-preset\\jest\\resolver.js",
+      "restoreMocks": false,
+      "rootDir": "D:\\careconnect\\mobile-app",
+      "roots": [
+        "D:\\careconnect\\mobile-app"
+      ],
+      "runner": "d:\\careconnect\\mobile-app\\node_modules\\jest-runner\\build\\index.js",
+      "sandboxInjectedGlobals": [],
+      "setupFiles": [
+        "D:\\careconnect\\mobile-app\\node_modules\\expo-module-scripts\\node_modules\\@react-native\\jest-preset\\jest\\setup.js",
+        "D:\\careconnect\\mobile-app\\node_modules\\expo-module-scripts\\node_modules\\jest-expo\\src\\preset\\setup.js",
+        "D:\\careconnect\\mobile-app\\jest.setup.js"
+      ],
+      "setupFilesAfterEnv": [],
+      "skipFilter": false,
+      "slowTestThreshold": 5,
+      "snapshotFormat": {
+        "escapeString": false,
+        "printBasicPrototype": false
+      },
+      "snapshotSerializers": [],
+      "testEnvironment": "D:\\careconnect\\mobile-app\\node_modules\\jest-environment-node\\build\\index.js",
+      "testEnvironmentOptions": {},
+      "testLocationInResults": false,
+      "testMatch": [
+        "**/__tests__/**/*.[jt]s?(x)",
+        "**/?(*.)+(spec|test).[tj]s?(x)"
+      ],
+      "testPathIgnorePatterns": [
+        "\\\\node_modules\\\\"
+      ],
+      "testRegex": [],
+      "testRunner": "D:\\careconnect\\mobile-app\\node_modules\\jest-circus\\runner.js",
+      "transform": [
+        [
+          "^.+\\.(bmp|gif|jpg|jpeg|mp4|png|psd|svg|webp)$",
+          "D:\\careconnect\\mobile-app\\node_modules\\expo-module-scripts\\node_modules\\@react-native\\jest-preset\\jest\\assetFileTransformer.js",
+          {}
+        ],
+        [
+          "\\.[jt]sx?$",
+          "D:\\careconnect\\mobile-app\\node_modules\\babel-jest\\build\\index.js",
+          {
+            "root": "d:\\careconnect\\mobile-app",
+            "babelrcRoots": "d:\\careconnect\\mobile-app",
+            "babelrc": true,
+            "configFile": true,
+            "extends": "d:\\careconnect\\mobile-app\\babel.config.js",
+            "caller": {
+              "name": "metro",
+              "bundler": "metro",
+              "platform": "ios"
+            }
+          }
+        ],
+        [
+          "^.+\\.(bmp|gif|jpg|jpeg|png|psd|svg|webp|xml|m4v|mov|mp4|mpeg|mpg|webm|aac|aiff|caf|m4a|mp3|wav|html|pdf|yaml|yml|otf|ttf|zip|heic|avif|db)$",
+          "D:\\careconnect\\mobile-app\\node_modules\\expo-module-scripts\\node_modules\\jest-expo\\src\\preset\\assetFileTransformer.js",
+          {}
+        ]
+      ],
+      "transformIgnorePatterns": [
+        "\\\\node_modules\\\\(?!(expo|expo-module-scripts|expo-modules-core|@expo|react-native|react-native-.*|@react-native|@unimodules|unimodules)\\\\)"
+      ],
+      "watchPathIgnorePatterns": []
+    }
+  ],
+  "globalConfig": {
+    "bail": 0,
+    "changedFilesWithAncestor": false,
+    "ci": false,
+    "collectCoverage": false,
+    "collectCoverageFrom": [],
+    "coverageDirectory": "D:\\careconnect\\mobile-app\\coverage",
+    "coverageProvider": "babel",
+    "coverageReporters": [
+      "json",
+      "text",
+      "lcov",
+      "clover"
+    ],
+    "detectLeaks": false,
+    "detectOpenHandles": false,
+    "errorOnDeprecated": false,
+    "expand": false,
+    "findRelatedTests": false,
+    "forceExit": false,
+    "json": false,
+    "lastCommit": false,
+    "listTests": false,
+    "logHeapUsage": false,
+    "maxConcurrency": 5,
+    "maxWorkers": 7,
+    "noStackTrace": false,
+    "nonFlagArgs": [],
+    "notify": false,
+    "notifyMode": "failure-change",
+    "onlyChanged": false,
+    "onlyFailures": false,
+    "openHandlesTimeout": 1000,
+    "passWithNoTests": false,
+    "projects": [],
+    "rootDir": "D:\\careconnect\\mobile-app",
+    "runTestsByPath": false,
+    "seed": -2049088121,
+    "skipFilter": false,
+    "snapshotFormat": {
+      "escapeString": false,
+      "printBasicPrototype": false
+    },
+    "testFailureExitCode": 1,
+    "testPathPattern": "",
+    "testSequencer": "D:\\careconnect\\mobile-app\\node_modules\\@jest\\test-sequencer\\build\\index.js",
+    "updateSnapshot": "new",
+    "useStderr": false,
+    "watch": false,
+    "watchAll": false,
+    "watchman": true,
+    "workerThreads": false
+  },
+  "version": "29.7.0"
+}

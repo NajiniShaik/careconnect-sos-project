@@ -944,6 +944,57 @@ class SecurityDay18APITests(TestCase):
         self.assertEqual(sos.status, "ACTIVE")
         self.assertTrue(ResponseUpdate.objects.filter(incident=sos, user=self.security_user).exists())
 
+    def test_volunteer_accepted_effective_status_accepts_acknowledged_update(self):
+        sos = SOS.objects.create(
+            user=self.resident_user,
+            message="Volunteer accepted incident",
+            location="Block 1",
+            category="medical",
+            status="ESCALATED",
+        )
+        sos.record_status_event("VOLUNTEER_ACCEPTED")
+        self.assertTrue(sos.can_transition_to("ACTIVE"))
+        self.client.force_authenticate(user=self.security_user)
+
+        response = self.client.post(
+            f"/api/sos/{sos.id}/updates/",
+            {"message": "Security acknowledged the incident.", "status": "ACKNOWLEDGED"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        sos.refresh_from_db()
+        self.assertEqual(sos.status, "ACTIVE")
+
+    def test_volunteer_accepted_effective_status_accepts_in_progress_update(self):
+        sos = SOS.objects.create(
+            user=self.resident_user,
+            message="Volunteer accepted incident",
+            location="Block 1",
+            category="medical",
+            status="ESCALATED",
+        )
+        sos.record_status_event("VOLUNTEER_ACCEPTED")
+        self.assertTrue(sos.can_transition_to("IN_PROGRESS"))
+
+
+    def test_coordination_status_is_the_status_used_for_transition_validation(self):
+        sos = SOS.objects.create(
+            user=self.resident_user,
+            message="Lifecycle status check",
+            location="Block 1",
+            category="medical",
+            status="ESCALATED",
+        )
+        sos.record_status_event("VOLUNTEER_ACCEPTED")
+        self.client.force_authenticate(user=self.security_user)
+
+        response = self.client.get(f"/api/sos/{sos.id}/coordination/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["current_status"], "VOLUNTEER_ACCEPTED")
+        self.assertTrue(sos.can_transition_to("ACTIVE"))
+
     def test_security_response_update_endpoint_rejects_invalid_status_transition(self):
         sos = SOS.objects.create(user=self.resident_user, message="Need help", location="Block 1", category="medical", status="CLOSED")
         self.client.force_authenticate(user=self.security_user)
@@ -951,6 +1002,45 @@ class SecurityDay18APITests(TestCase):
         response = self.client.post(
             f"/api/sos/{sos.id}/updates/",
             {"message": "Attempt to reopen.", "status": "OPEN"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("status", response.data)
+
+    def test_closed_incident_rejects_acknowledged_update(self):
+        sos = SOS.objects.create(
+            user=self.resident_user,
+            message="Closed incident",
+            location="Block 1",
+            category="medical",
+            status="CLOSED",
+        )
+        sos.record_status_event("INCIDENT_CLOSED")
+        self.client.force_authenticate(user=self.security_user)
+
+        response = self.client.post(
+            f"/api/sos/{sos.id}/updates/",
+            {"message": "Attempt to acknowledge closed incident.", "status": "ACKNOWLEDGED"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("status", response.data)
+
+    def test_resolved_incident_rejects_acknowledged_update(self):
+        sos = SOS.objects.create(
+            user=self.resident_user,
+            message="Resolved incident",
+            location="Block 1",
+            category="medical",
+            status="RESOLVED",
+        )
+        self.client.force_authenticate(user=self.security_user)
+
+        response = self.client.post(
+            f"/api/sos/{sos.id}/updates/",
+            {"message": "Attempt to acknowledge resolved incident.", "status": "ACKNOWLEDGED"},
             format="json",
         )
 
@@ -1331,6 +1421,36 @@ class SOSCategoryFlowTests(TestCase):
         sos = SOS.objects.create(user=other_user, message="Other", location="B", category="fire", status="OPEN")
 
         self.client.force_authenticate(user=self.user)
+        response = self.client.delete(f"/api/sos/alerts/{sos.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertTrue(SOS.objects.filter(pk=sos.id).exists())
+
+    def test_volunteer_cannot_delete_alert(self):
+        volunteer_user = self.user_model.objects.create_user(
+            username="volunteer_delete",
+            email="volunteer_delete@example.com",
+            password="testpass123",
+            role="VOLUNTEER",
+        )
+        sos = SOS.objects.create(user=self.user, message="Need help", location="A", category="medical", status="OPEN")
+
+        self.client.force_authenticate(user=volunteer_user)
+        response = self.client.delete(f"/api/sos/alerts/{sos.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertTrue(SOS.objects.filter(pk=sos.id).exists())
+
+    def test_guardian_cannot_delete_alert(self):
+        guardian_user = self.user_model.objects.create_user(
+            username="guardian_delete",
+            email="guardian_delete@example.com",
+            password="testpass123",
+            role="GUARDIAN",
+        )
+        sos = SOS.objects.create(user=self.user, message="Need help", location="A", category="medical", status="OPEN")
+
+        self.client.force_authenticate(user=guardian_user)
         response = self.client.delete(f"/api/sos/alerts/{sos.id}/")
 
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)

@@ -13,6 +13,7 @@ from .views import (
     SecurityRegisterView,
     VerifyOTPView,
     EmergencyContactViewSet,
+    ContactDirectoryViewSet,
     VolunteerAvailabilityView,
     SecurityAvailabilityView,
     )
@@ -29,6 +30,12 @@ router.register(
     "emergency-contacts",
     EmergencyContactViewSet,
     basename="emergency-contact",
+)
+
+router.register(
+    "contacts",
+    ContactDirectoryViewSet,
+    basename="contact-directory",
 )
 
 

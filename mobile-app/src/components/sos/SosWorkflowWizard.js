@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from "react-native";
-import { deleteAsync } from "expo-file-system/legacy";
+import { deleteAsync } from "../../utils/recordingFileSystem";
 import * as Location from "expo-location";
 import { useRouter } from "expo-router";
 import { RecordingPresets, requestRecordingPermissionsAsync, setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus, useAudioRecorder, useAudioRecorderState } from "expo-audio";

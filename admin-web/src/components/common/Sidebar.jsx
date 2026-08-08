@@ -8,6 +8,7 @@ const menuItems = [
   { name: "Residents", path: "/residents" },
   { name: "Emergency Contacts", path: "/emergency-contacts" },
   { name: "Alerts", path: "/alerts" },
+  { name: "Reporting", path: "/reporting" },
   { name: "Notifications", path: "/notifications" },
   {
     name: "Settings",

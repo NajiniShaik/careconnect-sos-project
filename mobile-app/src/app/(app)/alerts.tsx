@@ -2,10 +2,11 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import * as Location from "expo-location";
 import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
-import { useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { AppButton, AppScreen, PageHeader, SectionCard, StatusBadge, appColors } from "../../components/common/designSystem";
-import { getStoredUser } from "../../services/authService";
-import { declineSosAlert, deleteSosAlert, fetchSosAlerts, fetchSosCategories, fetchSosMessages, mergeSosMessages, navigateToSosLocation, normalizeSosHistory, openSosLocation, postSosMessage, respondToSosAlert, resolveSosAlert, retrySosTranscription, updateSosIncident } from "../../services/sosService";
+import { getStoredUser, getErrorMessage } from "../../services/authService";
+import { broadcastSosAlert } from "../../services/notificationService";
+import { declineSosAlert, deleteSosAlert, fetchSosAlert, fetchSosAlerts, fetchSosCategories, fetchSosMessages, fetchSosUpdates, mergeSosMessages, navigateToSosLocation, normalizeSosHistory, openSosLocation, postSosMessage, respondToSosAlert, resolveSosAlert, closeSosAlert, retrySosTranscription, updateSosIncident, getSosStatusLabel, subscribeToSosUpdates } from "../../services/sosService";
 
 function normalizeCategoryValue(value) {
   return String(value || "").trim().toLowerCase();
@@ -29,6 +30,49 @@ function isAlertOwnedByUser(alert = {}, user = null) {
   return ownerValue === residentUsername || ownerId === residentId;
 }
 
+function resolveAssignedVolunteerIdentity(alert = {}) {
+  const assigned =
+    alert?.assigned_volunteer ??
+    alert?.assignedVolunteer ??
+    alert?.assigned_volunteer_id ??
+    alert?.assignedVolunteerId ??
+    alert?.assigned_volunteer_name ??
+    alert?.assignedVolunteerName ??
+    null;
+  if (!assigned) {
+    return { id: "", username: "", email: "", label: "" };
+  }
+
+  if (typeof assigned === "object") {
+    const id = String(assigned.id ?? assigned.pk ?? "").trim().toLowerCase();
+    const username = String(assigned.username ?? assigned.name ?? "").trim().toLowerCase();
+    const email = String(assigned.email ?? "").trim().toLowerCase();
+    const label = String(assigned.username ?? assigned.name ?? assigned.email ?? assigned.id ?? "").trim().toLowerCase();
+    return { id, username, email, label };
+  }
+
+  const value = String(assigned).trim().toLowerCase();
+  return { id: value, username: value, email: value, label: value };
+}
+
+function isAlertAssignedToUser(alert = {}, user = null) {
+  if (!user || !alert) {
+    return false;
+  }
+
+  const assigned = resolveAssignedVolunteerIdentity(alert);
+  const userId = String(user?.id ?? "").trim().toLowerCase();
+  const userUsername = String(user?.username ?? user?.name ?? "").trim().toLowerCase();
+  const userEmail = String(user?.email ?? "").trim().toLowerCase();
+
+  return Boolean(
+    (assigned.id && userId && assigned.id === userId) ||
+    (assigned.username && userUsername && assigned.username === userUsername) ||
+    (assigned.email && userEmail && assigned.email === userEmail) ||
+    (assigned.label && (assigned.label === userUsername || assigned.label === userEmail))
+  );
+}
+
 function getCategoryDisplayName(category, categories = []) {
   const normalizedCategory = normalizeCategoryValue(category);
 
@@ -43,6 +87,69 @@ function getCategoryDisplayName(category, categories = []) {
   }
 
   return String(category).trim();
+}
+
+function getAlertResidentPhone(alert = {}) {
+  return (
+    alert.residentPhone ||
+    alert.userDetails?.phone ||
+    alert.userDetails?.phone_number ||
+    alert.userDetails?.mobile ||
+    alert.userDetails?.contact_number ||
+    ""
+  );
+}
+
+function getAlertUserLabel(alert = {}) {
+  const user = alert?.user;
+
+  if (!user) {
+    return "Unknown";
+  }
+
+  if (typeof user === "string") {
+    return user;
+  }
+
+  if (typeof user === "object") {
+    return (
+      user.username ||
+      user.name ||
+      user.email ||
+      (user.id ? `User #${user.id}` : "Unknown") ||
+      "Unknown"
+    );
+  }
+
+  return "Unknown";
+}
+
+function getAssignedVolunteerLabel(alert = {}, user = null) {
+  const assignedId = alert.assigned_volunteer_id || alert.assigned_volunteer || null;
+  const assignedName = alert.assigned_volunteer_name || (typeof alert.assigned_volunteer === "string" ? alert.assigned_volunteer : "");
+
+  if (assignedId && user && user.id && String(user.id) === String(assignedId)) {
+    return "You";
+  }
+
+  if (assignedName) {
+    return assignedName;
+  }
+
+  if (assignedId) {
+    return String(assignedId);
+  }
+
+  return "Unassigned";
+}
+
+function getIncidentLocationDetail(alert = {}) {
+  const parts = [];
+  if (alert.society) parts.push(alert.society);
+  if (alert.blockFlat) parts.push(alert.blockFlat);
+  if (alert.address) parts.push(alert.address);
+  const location = parts.join(" • ");
+  return location || alert.location || "";
 }
 
 function getStatusTone(status) {
@@ -61,6 +168,13 @@ function getStatusTone(status) {
   }
 
   return "neutral";
+}
+
+function isClosedAlert(alert = {}) {
+  const status = String(alert?.status || "").toUpperCase();
+  const currentStatus = String(alert?.current_status || "").toUpperCase();
+
+  return status === "CLOSED" || currentStatus === "INCIDENT_CLOSED";
 }
 
 function formatAlertTime(value) {
@@ -95,12 +209,14 @@ function getAlertIdentifier(alert = {}) {
     alert.pk ??
     alert.alert_id ??
     alert.alertId ??
+    alert.alertid ??
     null
   );
 }
 
 export default function AlertsRoute() {
   const params = useLocalSearchParams();
+  const router = useRouter();
   const [user, setUser] = useState(null);
   const [alerts, setAlerts] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -117,6 +233,13 @@ export default function AlertsRoute() {
   const [messagePostingByAlert, setMessagePostingByAlert] = useState({});
   const [locationLoadingByAlert, setLocationLoadingByAlert] = useState({});
   const [incidentUpdatingByAlert, setIncidentUpdatingByAlert] = useState({});
+  const [closureNotesByAlert, setClosureNotesByAlert] = useState({});
+  const [resolutionSummaryByAlert, setResolutionSummaryByAlert] = useState({});
+  const [actionsTakenByAlert, setActionsTakenByAlert] = useState({});
+  const [additionalRemarksByAlert, setAdditionalRemarksByAlert] = useState({});
+  const [closureLoadingByAlert, setClosureLoadingByAlert] = useState({});
+  const [closureErrorsByAlert, setClosureErrorsByAlert] = useState({});
+  const [closureSuccessByAlert, setClosureSuccessByAlert] = useState({});
   const [messageErrorsByAlert, setMessageErrorsByAlert] = useState({});
   const [incidentSuccessByAlert, setIncidentSuccessByAlert] = useState({});
   const [messageSuccessByAlert, setMessageSuccessByAlert] = useState({});
@@ -126,6 +249,7 @@ export default function AlertsRoute() {
   const [guardianResponseLoadingByAlert, setGuardianResponseLoadingByAlert] = useState({});
   const [guardianResponseErrorByAlert, setGuardianResponseErrorByAlert] = useState({});
   const [guardianResponseSuccessByAlert, setGuardianResponseSuccessByAlert] = useState({});
+  const [broadcastingAlertId, setBroadcastingAlertId] = useState(null);
 
   const voiceNotePlayer = useAudioPlayer(playingVoiceNoteUrl, { downloadFirst: true });
   const voiceNotePlayerStatus = useAudioPlayerStatus(voiceNotePlayer);
@@ -193,11 +317,21 @@ export default function AlertsRoute() {
   const role = String(user?.role || "").toUpperCase();
   const isAdmin = role === "ADMIN";
   const isSecurity = role === "SECURITY";
+  const isVolunteer = role === "VOLUNTEER";
   const isResident = role === "RESIDENT";
   const isGuardian = role === "GUARDIAN";
 
+  const selectedAlertId = String(params?.alert_id || params?.alertId || params?.alertid || "").trim();
+
   useEffect(() => {
-    const selectedAlertId = String(params?.alert_id || params?.alertId || params?.alertid || "").trim();
+    if (!selectedAlertId) {
+      return;
+    }
+
+    void loadAlerts(true);
+  }, [selectedAlertId, loadAlerts]);
+
+  useEffect(() => {
     if (!selectedAlertId || !alerts.length) {
       return;
     }
@@ -206,7 +340,36 @@ export default function AlertsRoute() {
     if (found) {
       setExpandedAlertId(selectedAlertId);
     }
-  }, [alerts, params]);
+  }, [alerts, selectedAlertId]);
+
+  const loadSelectedAlertDetail = useCallback(async (alertId) => {
+    if (!alertId) {
+      return;
+    }
+
+    try {
+      const response = await fetchSosAlert(alertId);
+      const normalizedDetail = normalizeSosHistory(Array.isArray(response?.data) ? response.data : [response?.data])[0] || null;
+      if (!normalizedDetail) {
+        return;
+      }
+
+      setAlerts((prev) => {
+        const existing = prev.filter((item) => String(getAlertIdentifier(item)) !== String(alertId));
+        return [normalizedDetail, ...existing];
+      });
+    } catch (error) {
+      console.log("[alerts] Failed to refresh selected alert detail", { alertId, error });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!selectedAlertId || !alerts.length) {
+      return;
+    }
+
+    void loadSelectedAlertDetail(selectedAlertId);
+  }, [selectedAlertId, alerts.length, loadSelectedAlertDetail]);
 
   const handleResolveAlert = async (alert) => {
     const alertId = getAlertIdentifier(alert);
@@ -237,6 +400,56 @@ export default function AlertsRoute() {
     } finally {
       setActionLoadingId(null);
       console.log("[alerts] resolveAlert: complete", { alertId });
+    }
+  };
+
+  const handleCloseIncident = async (alert) => {
+    const alertId = getAlertIdentifier(alert);
+    console.log("[alerts] Close incident pressed", { alertId });
+
+    if (!alertId) {
+      console.log("[alerts] Close incident skipped: missing alert id", alert);
+      return;
+    }
+
+    const closurePayload = {
+      closure_notes: String(closureNotesByAlert[alertId] ?? alert.closure_notes ?? "").trim(),
+      resolution_summary: String(resolutionSummaryByAlert[alertId] ?? alert.resolution_summary ?? "").trim(),
+      actions_taken: String(actionsTakenByAlert[alertId] ?? alert.actions_taken ?? "").trim(),
+      additional_remarks: String(additionalRemarksByAlert[alertId] ?? alert.additional_remarks ?? "").trim(),
+    };
+
+    if (!closurePayload.closure_notes && !closurePayload.resolution_summary && !closurePayload.actions_taken && !closurePayload.additional_remarks) {
+      setClosureErrorsByAlert((prev) => ({ ...prev, [alertId]: "Provide at least one closure detail before closing the incident." }));
+      return;
+    }
+
+    setClosureLoadingByAlert((prev) => ({ ...prev, [alertId]: true }));
+    setClosureErrorsByAlert((prev) => ({ ...prev, [alertId]: "" }));
+    setClosureSuccessByAlert((prev) => ({ ...prev, [alertId]: "" }));
+
+    try {
+      const response = await closeSosAlert(alertId, closurePayload);
+      console.log("[alerts] closeIncident: service returned", { alertId, status: response?.status, body: response?.data });
+
+      const updatedAlert = response?.data || null;
+      if (updatedAlert) {
+        setAlerts((prev) => prev.map((item) => (String(item.id) === String(alert.id) ? { ...item, ...updatedAlert } : item)));
+      }
+
+      await loadAlerts(true);
+      setClosureSuccessByAlert((prev) => ({ ...prev, [alertId]: "Incident closed successfully." }));
+    } catch (error) {
+      console.log("[alerts] Failed to close incident", {
+        alertId,
+        status: error?.response?.status,
+        body: error?.response?.data,
+        message: error?.message,
+      });
+      setClosureErrorsByAlert((prev) => ({ ...prev, [alertId]: "Unable to close the incident right now." }));
+      Alert.alert("Unable to close", "The incident could not be closed right now.");
+    } finally {
+      setClosureLoadingByAlert((prev) => ({ ...prev, [alertId]: false }));
     }
   };
 
@@ -316,6 +529,29 @@ export default function AlertsRoute() {
     return filteredAlerts.filter((alert) => isAlertOwnedByUser(alert, user));
   }, [filteredAlerts, isResident, user]);
 
+  const logsForSelectedAlert = useMemo(() => {
+    if (!selectedAlertId) return null;
+    const selected = filteredAlerts.find((alert) => String(getAlertIdentifier(alert)) === selectedAlertId);
+    if (!selected) return null;
+    return {
+      role,
+      selectedAlertId,
+      expandedAlertId,
+      assignedVolunteer: selected.assigned_volunteer_id ?? selected.assigned_volunteer,
+      status: selected.status,
+      current_status: selected.current_status,
+      canViewAlertUpdates: Boolean(selected?.id),
+      messagesLoaded: Boolean(messagesByAlert[selectedAlertId]),
+      messagesCount: Array.isArray(messagesByAlert[selectedAlertId]) ? messagesByAlert[selectedAlertId].length : 0,
+    };
+  }, [filteredAlerts, selectedAlertId, expandedAlertId, messagesByAlert]);
+
+  useEffect(() => {
+    if (logsForSelectedAlert) {
+      console.log("[alerts] selected alert state", logsForSelectedAlert);
+    }
+  }, [logsForSelectedAlert]);
+
   const loadAlertMessages = useCallback(async (alertId) => {
     if (!alertId) {
       return;
@@ -337,13 +573,26 @@ export default function AlertsRoute() {
   }, []);
 
   const handleToggleAlertMessages = useCallback(async (alert) => {
-    const canViewAlertUpdates = isAdmin || isSecurity || (isResident && isAlertOwnedByUser(alert, user));
+    const alertId = String(getAlertIdentifier(alert) || "");
+    const canViewAlertUpdates = Boolean(alertId);
 
-    if (!alert?.id || !canViewAlertUpdates) {
+    console.log("[alerts] toggle messages", {
+      role,
+      selectedAlertId,
+      expandedAlertId,
+      canViewAlertUpdates,
+      alertId,
+      assignedVolunteer: alert?.assigned_volunteer_id ?? alert?.assigned_volunteer,
+      status: alert?.status,
+      current_status: alert?.current_status,
+      hasMessages: Boolean(messagesByAlert[alertId]),
+      messagesCount: Array.isArray(messagesByAlert[alertId]) ? messagesByAlert[alertId].length : 0,
+    });
+
+    if (!alertId || !canViewAlertUpdates) {
       return;
     }
 
-    const alertId = String(alert.id);
     if (expandedAlertId === alertId) {
       setExpandedAlertId(null);
       return;
@@ -353,7 +602,40 @@ export default function AlertsRoute() {
     if (!messagesByAlert[alertId]) {
       await loadAlertMessages(alertId);
     }
-  }, [expandedAlertId, isAdmin, isResident, isSecurity, loadAlertMessages, messagesByAlert, user]);
+  }, [expandedAlertId, loadAlertMessages, messagesByAlert]);
+
+  useEffect(() => {
+    if (!expandedAlertId) {
+      return;
+    }
+
+    console.log("[alerts] load messages effect", {
+      role,
+      selectedAlertId,
+      expandedAlertId,
+      hasMessages: Boolean(messagesByAlert[expandedAlertId]),
+      messagesCount: Array.isArray(messagesByAlert[expandedAlertId]) ? messagesByAlert[expandedAlertId].length : 0,
+    });
+
+    if (!messagesByAlert[expandedAlertId]) {
+      void loadAlertMessages(expandedAlertId);
+    }
+  }, [expandedAlertId, loadAlertMessages, messagesByAlert, role, selectedAlertId]);
+
+  useEffect(() => {
+    const unsub = subscribeToSosUpdates((sosId, update) => {
+      setMessagesByAlert((prev) => {
+        if (!prev || !prev[sosId]) return prev;
+        const existing = prev[sosId] || [];
+        const next = mergeSosMessages(existing, update);
+        return { ...prev, [sosId]: next };
+      });
+    });
+
+    return () => {
+      try { unsub(); } catch (e) {}
+    };
+  }, []);
 
   const handlePostMessage = useCallback(async (alert) => {
     if (!alert?.id || !isAlertOwnedByUser(alert, user)) {
@@ -383,16 +665,77 @@ export default function AlertsRoute() {
         }));
       }
 
-      setMessageDraftsByAlert((prev) => ({ ...prev, [alertId]: "" }));
-      await loadAlertMessages(alert.id);
-      setMessageSuccessByAlert((prev) => ({ ...prev, [alertId]: "Message added to the incident timeline." }));
-    } catch (error) {
-      console.log("[alerts] Failed to post incident message", error);
-      setMessageErrorsByAlert((prev) => ({ ...prev, [alertId]: "Unable to add the message right now." }));
+      setMessageErrorsByAlert((prev) => ({ ...prev, [alertId]: "" }));
+      setMessageLoadingByAlert((prev) => ({ ...prev, [alertId]: true }));
+
+      try {
+        // Fetch chat messages
+        const chatResp = await fetchSosMessages(alertId);
+        const chatMessages = Array.isArray(chatResp?.data) ? chatResp.data : [];
+
+        // Fetch responder updates and normalize to chat-like shape for preview
+        let updateItems = [];
+        try {
+          const updatesResp = await fetchSosUpdates(alertId);
+          updateItems = Array.isArray(updatesResp?.data) ? updatesResp.data.map((u) => ({
+            id: u.id,
+            message: u.message,
+            sender: u.user || null,
+            role: u.role || null,
+            update_type: u.update_type || null,
+            created_at: u.created_at || u.createdAt || null,
+          })) : [];
+        } catch (e) {
+          // If updates fetch fails silently, keep chat messages
+          updateItems = [];
+        }
+
+        // Merge both sets so alert preview shows both chat and response updates
+        const combined = [...chatMessages, ...updateItems];
+        setMessagesByAlert((prev) => ({ ...prev, [alertId]: combined }));
+      } catch (err) {
+        setMessageErrorsByAlert((prev) => ({ ...prev, [alertId]: getErrorMessage(err) || "Unable to load incident updates right now." }));
+      } finally {
+        setMessageLoadingByAlert((prev) => ({ ...prev, [alertId]: false }));
+      }
+    } catch (postErr) {
+      console.log("[alerts] Failed to post message", postErr);
+      setMessageErrorsByAlert((prev) => ({ ...prev, [alertId]: getErrorMessage(postErr) || "Unable to post the message right now." }));
     } finally {
       setMessagePostingByAlert((prev) => ({ ...prev, [alertId]: false }));
     }
-  }, [loadAlertMessages, messageDraftsByAlert, user]);
+  }, []);
+
+  const handleBroadcastAlert = useCallback(async (alert) => {
+    const alertId = getAlertIdentifier(alert);
+    if (!alertId) {
+      Alert.alert("Unable to broadcast", "This incident does not have a valid id.");
+      return;
+    }
+
+    if (broadcastingAlertId === String(alertId)) {
+      return;
+    }
+
+    setBroadcastingAlertId(String(alertId));
+
+    try {
+      const response = await broadcastSosAlert(alertId, false);
+      const summary = response?.data || {};
+      const recipientSummary = [
+        summary?.volunteers ? `${summary.volunteers} volunteer(s)` : null,
+        summary?.security ? `${summary.security} security` : null,
+        summary?.residents ? `${summary.residents} resident(s)` : null,
+      ].filter(Boolean).join(", ");
+      const message = recipientSummary ? `Broadcast started for ${recipientSummary}.` : "Broadcast started.";
+      Alert.alert("Broadcast started", message);
+    } catch (error) {
+      const detail = error?.response?.data?.detail || error?.response?.data?.message || "Unable to broadcast the alert right now.";
+      Alert.alert("Unable to broadcast", detail);
+    } finally {
+      setBroadcastingAlertId(null);
+    }
+  }, [broadcastingAlertId]);
 
   const handleGuardianRespond = useCallback(async (alert, action = "accept") => {
     const alertId = getAlertIdentifier(alert);
@@ -450,6 +793,26 @@ export default function AlertsRoute() {
       Alert.alert("Unable to open location", "The alert location could not be opened right now.");
     }
   }, []);
+
+  const handleOpenEmergencyChat = useCallback((alert) => {
+    const alertId = getAlertIdentifier(alert);
+    if (!alertId) {
+      Alert.alert("Unable to open chat", "This incident does not have a valid id.");
+      return;
+    }
+
+    router.push({ pathname: "/(app)/emergency-chat", params: { incident_id: alertId } });
+  }, [router]);
+
+  const handleOpenIncidentUpdates = useCallback((alert) => {
+    const alertId = getAlertIdentifier(alert);
+    if (!alertId) {
+      Alert.alert("Unable to open incident updates", "This incident does not have a valid id.");
+      return;
+    }
+
+    router.push({ pathname: "/incident-updates", params: { incident_id: alertId } });
+  }, [router]);
 
   const handleRefreshLocation = useCallback(async (alert) => {
     if (!alert?.id || !isAlertOwnedByUser(alert, user)) {
@@ -655,10 +1018,34 @@ export default function AlertsRoute() {
           ) : (
             <View style={styles.alertListContent}>
               {visibleAlerts.map((alert) => {
-                const canViewAlertUpdates = isAdmin || isSecurity || (isResident && isAlertOwnedByUser(alert, user));
+                const alertId = String(getAlertIdentifier(alert) || "");
+                const canViewAlertUpdates = Boolean(alertId);
+                const closedAlert = isClosedAlert(alert);
+                const closureSummaryFields = [
+                  { label: "Closure notes", value: alert?.closure_notes },
+                  { label: "Resolution summary", value: alert?.resolution_summary },
+                  { label: "Actions taken", value: alert?.actions_taken },
+                  { label: "Additional remarks", value: alert?.additional_remarks },
+                ].filter((field) => Boolean(String(field.value || "").trim()));
+
+                console.log("[alerts] render alert", {
+                  role,
+                  alertId,
+                  canViewAlertUpdates,
+                  isAdmin,
+                  isSecurity,
+                  isVolunteer,
+                  isResident,
+                  isAlertOwnedByUser: isAlertOwnedByUser(alert, user),
+                  isAlertAssignedToUser: isAlertAssignedToUser(alert, user),
+                  shouldRenderIncidentUpdates: canViewAlertUpdates,
+                  assignedVolunteer: alert?.assigned_volunteer_id ?? alert?.assigned_volunteer,
+                  status: alert?.status,
+                  current_status: alert?.current_status,
+                });
 
                 return (
-                  <View key={alert.id || `${alert.message}-${alert.created_at}`} style={styles.alertCard}>
+                  <View key={alertId || `${alert.message}-${alert.created_at}`} style={styles.alertCard}>
                     <View style={styles.alertHeaderRow}>
                       <View style={styles.badgeRow}>
                         <View style={styles.categoryBadge}>
@@ -669,9 +1056,58 @@ export default function AlertsRoute() {
                     </View>
 
                     <Text style={styles.alertMessage}>{alert.message || "Emergency alert"}</Text>
+                    {expandedAlertId === alertId ? (
+                      <View style={styles.alertDetailPanel}>
+                        <View style={styles.detailRow}>
+                          <Text style={styles.detailLabel}>SOS Status</Text>
+                          <Text style={styles.detailValue}>{String(getSosStatusLabel(alert.status) || alert.status || "Unknown")}</Text>
+                        </View>
+                        <View style={styles.detailRow}>
+                          <Text style={styles.detailLabel}>Current status</Text>
+                          <Text style={styles.detailValue}>{String(getSosStatusLabel(alert.current_status || alert.status) || alert.current_status || alert.status || "Unknown")}</Text>
+                        </View>
+                        <View style={styles.detailRow}>
+                          <Text style={styles.detailLabel}>Resident</Text>
+                          <Text style={styles.detailValue}>{getAlertUserLabel(alert)}</Text>
+                        </View>
+                        {getAlertResidentPhone(alert) ? (
+                          <View style={styles.detailRow}>
+                            <Text style={styles.detailLabel}>Resident phone</Text>
+                            <Text style={styles.detailValue}>{getAlertResidentPhone(alert)}</Text>
+                          </View>
+                        ) : null}
+                        <View style={styles.detailRow}>
+                          <Text style={styles.detailLabel}>Location</Text>
+                          <Text style={styles.detailValue}>{getIncidentLocationDetail(alert) || "Location unavailable"}</Text>
+                        </View>
+                        <View style={styles.detailRow}>
+                          <Text style={styles.detailLabel}>SOS type</Text>
+                          <Text style={styles.detailValue}>{getCategoryDisplayName(getAlertCategoryValue(alert), categories)}</Text>
+                        </View>
+                        <View style={styles.detailRow}>
+                          <Text style={styles.detailLabel}>Time created</Text>
+                          <Text style={styles.detailValue}>{formatAlertTime(alert.created_at)}</Text>
+                        </View>
+                        <View style={styles.detailRow}>
+                          <Text style={styles.detailLabel}>Assigned volunteer</Text>
+                          <Text style={styles.detailValue}>{getAssignedVolunteerLabel(alert, user)}</Text>
+                        </View>
+                        {closedAlert && closureSummaryFields.length > 0 ? (
+                          <View style={styles.closureSummarySection}>
+                            <Text style={styles.closureSummaryTitle}>Incident Closure Summary</Text>
+                            {closureSummaryFields.map((field) => (
+                              <View key={field.label} style={styles.closureSummaryRow}>
+                                <Text style={styles.closureSummaryLabel}>{field.label}</Text>
+                                <Text style={styles.closureSummaryValue}>{field.value}</Text>
+                              </View>
+                            ))}
+                          </View>
+                        ) : null}
+                      </View>
+                    ) : null}
                     {isSecurity || isAdmin ? (
                       <View style={styles.userMetaWrap}>
-                        <Text style={styles.metaText}>Resident: {alert.user || "Unknown"}</Text>
+                        <Text style={styles.metaText}>Resident: {getAlertUserLabel(alert)}</Text>
                         {alert.location ? <Text style={styles.metaText}>Location: {alert.location}</Text> : null}
                       </View>
                     ) : null}
@@ -684,7 +1120,7 @@ export default function AlertsRoute() {
                           <Text style={styles.guardianHint}>Reply to the resident request.</Text>
                         </View>
 
-                        <Text style={styles.metaText}>Resident: {alert.user || "Unknown"}</Text>
+                        <Text style={styles.metaText}>Resident: {getAlertUserLabel(alert)}</Text>
                         {alert.location ? <Text style={styles.metaText}>Location: {alert.location}</Text> : null}
 
                         <View style={styles.actionRow}>
@@ -727,48 +1163,120 @@ export default function AlertsRoute() {
                     ) : null}
 
                     {isAdmin ? (
-                      <View style={styles.actionRow}>
-                        <AppButton
-                          title={actionLoadingId === getAlertIdentifier(alert) ? "Working..." : "Resolve"}
-                          onPress={() => {
-                            const alertId = getAlertIdentifier(alert);
-                            console.log("[alerts] Resolve button tapped", { alertId });
-                            void handleResolveAlert(alert);
-                          }}
-                          variant="secondary"
-                          style={styles.actionButton}
-                          loading={actionLoadingId === getAlertIdentifier(alert)}
-                        />
-                        <AppButton
-                          title={actionLoadingId === getAlertIdentifier(alert) ? "Working..." : "Delete"}
-                          onPress={() => {
-                            const alertId = getAlertIdentifier(alert);
-                            console.log("[alerts] Delete button tapped", { alertId });
-                            void handleDeleteAlert(alert);
-                          }}
-                          variant="danger"
-                          style={styles.actionButton}
-                          loading={actionLoadingId === getAlertIdentifier(alert)}
-                        />
-                      </View>
+                      <>
+                        <View style={styles.actionRow}>
+                          <AppButton
+                            title={actionLoadingId === getAlertIdentifier(alert) ? "Working..." : "Resolve"}
+                            onPress={() => {
+                              const alertId = getAlertIdentifier(alert);
+                              console.log("[alerts] Resolve button tapped", { alertId });
+                              void handleResolveAlert(alert);
+                            }}
+                            variant="secondary"
+                            style={styles.actionButton}
+                            loading={actionLoadingId === getAlertIdentifier(alert)}
+                          />
+                          <AppButton
+                            title={broadcastingAlertId === String(getAlertIdentifier(alert)) ? "Broadcasting..." : "Broadcast"}
+                            onPress={() => void handleBroadcastAlert(alert)}
+                            variant="secondary"
+                            style={styles.actionButton}
+                            loading={broadcastingAlertId === String(getAlertIdentifier(alert))}
+                          />
+                          <AppButton
+                            title={actionLoadingId === getAlertIdentifier(alert) ? "Working..." : "Delete"}
+                            onPress={() => {
+                              const alertId = getAlertIdentifier(alert);
+                              console.log("[alerts] Delete button tapped", { alertId });
+                              void handleDeleteAlert(alert);
+                            }}
+                            variant="danger"
+                            style={styles.actionButton}
+                            loading={actionLoadingId === getAlertIdentifier(alert)}
+                          />
+                        </View>
+
+                        {String(alert.status || "").toUpperCase() === "RESOLVED" ? (
+                          <View style={styles.updateForm}>
+                            <Text style={styles.fieldLabel}>Closure notes</Text>
+                            <TextInput
+                              style={styles.messageInput}
+                              placeholder="Add closure notes"
+                              placeholderTextColor={appColors.muted}
+                              value={closureNotesByAlert[String(alert.id)] ?? alert.closure_notes ?? ""}
+                              onChangeText={(value) => setClosureNotesByAlert((prev) => ({ ...prev, [String(alert.id)]: value.slice(0, 500) }))}
+                              multiline
+                              maxLength={500}
+                            />
+
+                            <Text style={styles.fieldLabel}>Resolution summary</Text>
+                            <TextInput
+                              style={styles.messageInput}
+                              placeholder="Summarize how the incident was resolved"
+                              placeholderTextColor={appColors.muted}
+                              value={resolutionSummaryByAlert[String(alert.id)] ?? alert.resolution_summary ?? ""}
+                              onChangeText={(value) => setResolutionSummaryByAlert((prev) => ({ ...prev, [String(alert.id)]: value.slice(0, 500) }))}
+                              multiline
+                              maxLength={500}
+                            />
+
+                            <Text style={styles.fieldLabel}>Actions taken</Text>
+                            <TextInput
+                              style={styles.messageInput}
+                              placeholder="Document actions taken to close the incident"
+                              placeholderTextColor={appColors.muted}
+                              value={actionsTakenByAlert[String(alert.id)] ?? alert.actions_taken ?? ""}
+                              onChangeText={(value) => setActionsTakenByAlert((prev) => ({ ...prev, [String(alert.id)]: value.slice(0, 500) }))}
+                              multiline
+                              maxLength={500}
+                            />
+
+                            <Text style={styles.fieldLabel}>Additional remarks</Text>
+                            <TextInput
+                              style={styles.messageInput}
+                              placeholder="Any additional remarks"
+                              placeholderTextColor={appColors.muted}
+                              value={additionalRemarksByAlert[String(alert.id)] ?? alert.additional_remarks ?? ""}
+                              onChangeText={(value) => setAdditionalRemarksByAlert((prev) => ({ ...prev, [String(alert.id)]: value.slice(0, 500) }))}
+                              multiline
+                              maxLength={500}
+                            />
+
+                            <AppButton
+                              title={closureLoadingByAlert[String(alert.id)] ? "Closing..." : "Close Incident"}
+                              onPress={() => void handleCloseIncident(alert)}
+                              variant="primary"
+                              style={styles.sendButton}
+                              loading={closureLoadingByAlert[String(alert.id)]}
+                            />
+
+                            {closureSuccessByAlert[String(alert.id)] ? <Text style={styles.successText}>{closureSuccessByAlert[String(alert.id)]}</Text> : null}
+                            {closureErrorsByAlert[String(alert.id)] ? <Text style={styles.messageError}>{closureErrorsByAlert[String(alert.id)]}</Text> : null}
+                          </View>
+                        ) : null}
+                      </>
                     ) : null}
                     {canViewAlertUpdates ? (
                       <>
                         <View style={styles.updateSection}>
-                          <Pressable style={styles.updateToggle} onPress={() => void handleToggleAlertMessages(alert)}>
-                            <Text style={styles.updateTitle}>Incident Updates</Text>
-                            <Text style={styles.updateHint}>{expandedAlertId === String(alert.id) ? "Hide" : "Show"}</Text>
-                          </Pressable>
+                          <View style={styles.updateHeaderRow}>
+                            <Pressable style={styles.updateToggle} onPress={() => void handleToggleAlertMessages(alert)}>
+                              <Text style={styles.updateTitle}>Incident Updates</Text>
+                              <Text style={styles.updateHint}>{expandedAlertId === alertId ? "Hide" : "Show"}</Text>
+                            </Pressable>
+                            <AppButton title="Open Chat" variant="secondary" style={styles.chatButton} onPress={() => handleOpenEmergencyChat(alert)} />
+                            <AppButton title="Incident Updates" variant="secondary" style={styles.chatButton} onPress={() => handleOpenIncidentUpdates(alert)} />
+                          </View>
 
-                          {expandedAlertId === String(alert.id) ? (
+                          {expandedAlertId === alertId ? (
                             <View style={styles.updateContent}>
-                              {messageLoadingByAlert[String(alert.id)] ? (
+                              {messageLoadingByAlert[alertId] ? (
                                 <Text style={styles.emptyText}>Loading updates...</Text>
-                              ) : (messagesByAlert[String(alert.id)] || []).length === 0 ? (
+                              ) : (messagesByAlert[alertId] || []).length === 0 ? (
                                 <Text style={styles.emptyText}>No incident updates yet.</Text>
                               ) : (
                                 <View style={styles.messageList}>
-                                  {sortMessagesForDisplay(messagesByAlert[String(alert.id)] || []).map((message) => (
+                                  {sortMessagesForDisplay(messagesByAlert[alertId] || []).map((message) => (
                                     <View key={message.id || `${message.created_at}-${message.message}`} style={styles.messageBubble}>
                                       <Text style={styles.messageText}>{message.message}</Text>
                                       {message.audio_url ? (
@@ -790,7 +1298,7 @@ export default function AlertsRoute() {
                                           ) : (
                                             <View style={styles.voiceNoteRow}>
                                               <Text style={styles.transcriptText}>Transcript unavailable.</Text>
-                                              <AppButton title="Retry transcription" onPress={() => void handleRetryTranscription(alert)} variant="secondary" style={styles.actionButton} loading={transcriptionLoadingByAlert[String(alert.id)]} />
+                                              <AppButton title="Retry transcription" onPress={() => void handleRetryTranscription(alert)} variant="secondary" style={styles.actionButton} loading={transcriptionLoadingByAlert[alertId]} />
                                             </View>
                                           )}
                                         </View>
@@ -807,17 +1315,17 @@ export default function AlertsRoute() {
                                     <Text style={styles.fieldLabel}>Current address</Text>
                                     <Text style={styles.locationValue}>{alert.address || alert.location || "Address unavailable"}</Text>
                                     <Text style={styles.locationValue}>
-                                      Lat: {Number.isFinite(incidentCoordinatesByAlert[String(alert.id)]?.latitude ?? alert.latitude) ? String(incidentCoordinatesByAlert[String(alert.id)]?.latitude ?? alert.latitude) : "—"} • Lon: {Number.isFinite(incidentCoordinatesByAlert[String(alert.id)]?.longitude ?? alert.longitude) ? String(incidentCoordinatesByAlert[String(alert.id)]?.longitude ?? alert.longitude) : "—"}
+                                      Lat: {Number.isFinite(incidentCoordinatesByAlert[alertId]?.latitude ?? alert.latitude) ? String(incidentCoordinatesByAlert[alertId]?.latitude ?? alert.latitude) : "—"} • Lon: {Number.isFinite(incidentCoordinatesByAlert[alertId]?.longitude ?? alert.longitude) ? String(incidentCoordinatesByAlert[alertId]?.longitude ?? alert.longitude) : "—"}
                                     </Text>
                                   </View>
 
                                   <View style={styles.actionRow}>
                                     <AppButton
-                                      title={locationLoadingByAlert[String(alert.id)] ? "Refreshing..." : "Refresh Location"}
+                                      title={locationLoadingByAlert[alertId] ? "Refreshing..." : "Refresh Location"}
                                       onPress={() => void handleRefreshLocation(alert)}
                                       variant="secondary"
                                       style={styles.actionButton}
-                                      loading={locationLoadingByAlert[String(alert.id)]}
+                                      loading={locationLoadingByAlert[alertId]}
                                     />
                                   </View>
 
@@ -826,17 +1334,17 @@ export default function AlertsRoute() {
                                     style={styles.messageInput}
                                     placeholder="Add an update for the incident timeline"
                                     placeholderTextColor={appColors.muted}
-                                    value={messageDraftsByAlert[String(alert.id)] ?? ""}
-                                    onChangeText={(value) => setMessageDraftsByAlert((prev) => ({ ...prev, [String(alert.id)]: value.slice(0, 500) }))}
+                                    value={messageDraftsByAlert[alertId] ?? ""}
+                                    onChangeText={(value) => setMessageDraftsByAlert((prev) => ({ ...prev, [alertId]: value.slice(0, 500) }))}
                                     multiline
                                     maxLength={500}
                                   />
                                   <AppButton
-                                    title={messagePostingByAlert[String(alert.id)] ? "Posting..." : "Add Message"}
+                                    title={messagePostingByAlert[alertId] ? "Posting..." : "Add Message"}
                                     onPress={() => void handlePostMessage(alert)}
                                     variant="secondary"
                                     style={styles.sendButton}
-                                    loading={messagePostingByAlert[String(alert.id)]}
+                                    loading={messagePostingByAlert[alertId]}
                                   />
 
                                   <Text style={styles.fieldLabel}>Emergency Description</Text>
@@ -844,25 +1352,25 @@ export default function AlertsRoute() {
                                     style={styles.messageInput}
                                     placeholder="Describe the incident"
                                     placeholderTextColor={appColors.muted}
-                                    value={incidentDrafts[String(alert.id)] ?? alert.message ?? ""}
-                                    onChangeText={(value) => setIncidentDrafts((prev) => ({ ...prev, [String(alert.id)]: value.slice(0, 500) }))}
+                                    value={incidentDrafts[alertId] ?? alert.message ?? ""}
+                                    onChangeText={(value) => setIncidentDrafts((prev) => ({ ...prev, [alertId]: value.slice(0, 500) }))}
                                     multiline
                                     maxLength={500}
                                   />
 
                                   <AppButton
-                                    title={incidentUpdatingByAlert[String(alert.id)] ? "Updating..." : "Update Incident"}
+                                    title={incidentUpdatingByAlert[alertId] ? "Updating..." : "Update Incident"}
                                     onPress={() => void handleUpdateIncident(alert)}
                                     variant="primary"
                                     style={styles.sendButton}
-                                    loading={incidentUpdatingByAlert[String(alert.id)]}
+                                    loading={incidentUpdatingByAlert[alertId]}
                                   />
                                 </View>
                               ) : null}
 
-                              {messageSuccessByAlert[String(alert.id)] ? <Text style={styles.successText}>{messageSuccessByAlert[String(alert.id)]}</Text> : null}
-                              {incidentSuccessByAlert[String(alert.id)] ? <Text style={styles.successText}>{incidentSuccessByAlert[String(alert.id)]}</Text> : null}
-                              {messageErrorsByAlert[String(alert.id)] ? <Text style={styles.messageError}>{messageErrorsByAlert[String(alert.id)]}</Text> : null}
+                              {messageSuccessByAlert[alertId] ? <Text style={styles.successText}>{messageSuccessByAlert[alertId]}</Text> : null}
+                              {incidentSuccessByAlert[alertId] ? <Text style={styles.successText}>{incidentSuccessByAlert[alertId]}</Text> : null}
+                              {messageErrorsByAlert[alertId] ? <Text style={styles.messageError}>{messageErrorsByAlert[alertId]}</Text> : null}
                             </View>
                           ) : null}
                         </View>
@@ -931,7 +1439,9 @@ const styles = StyleSheet.create({
   guardianTitle: { color: appColors.navy, fontSize: 13, fontWeight: "700" },
   guardianHint: { color: appColors.blue, fontSize: 11, fontWeight: "700" },
   updateSection: { marginTop: 10, borderTopWidth: 1, borderTopColor: appColors.border, paddingTop: 10 },
-  updateToggle: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 },
+  updateHeaderRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8, gap: 8 },
+  updateToggle: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", flex: 1 },
+  chatButton: { minWidth: 88 },
   updateTitle: { color: appColors.navy, fontSize: 13, fontWeight: "700" },
   updateHint: { color: appColors.blue, fontSize: 12, fontWeight: "700" },
   updateContent: { gap: 8 },
@@ -956,4 +1466,9 @@ const styles = StyleSheet.create({
   detailRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: appColors.border },
   detailLabel: { color: appColors.slate },
   detailValue: { color: appColors.navy, fontWeight: "700" },
+  closureSummarySection: { marginTop: 10, borderWidth: 1, borderColor: appColors.border, borderRadius: 10, padding: 10, backgroundColor: appColors.white },
+  closureSummaryTitle: { color: appColors.navy, fontSize: 13, fontWeight: "700", marginBottom: 8 },
+  closureSummaryRow: { marginTop: 8 },
+  closureSummaryLabel: { color: appColors.slate, fontSize: 12, fontWeight: "700" },
+  closureSummaryValue: { color: appColors.navy, fontSize: 12, marginTop: 2, lineHeight: 18 },
 });

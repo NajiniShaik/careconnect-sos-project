@@ -1,6 +1,4 @@
-import axios from "axios";
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
 
 import AdminLayout from "../components/common/AdminLayout";
 import DataTable from "../components/common/DataTable";
@@ -80,7 +78,6 @@ function StatCard({ title, value, subtitle, tone = "primary" }) {
 // Charts are rendered via responsive Recharts components in ../components/common/Charts
 
 function Dashboard() {
-  const navigate = useNavigate();
   const [overview, setOverview] = useState({});
   const [monitoringData, setMonitoringData] = useState([]);
   const [deliverySummary, setDeliverySummary] = useState({});

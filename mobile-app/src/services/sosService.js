@@ -254,6 +254,18 @@ export async function fetchSecurityDashboardData() {
   return api.get('/sos/security-dashboard/', { headers });
 }
 
+export async function fetchSecurityIncidentCoordination(id) {
+  const token = await getStoredToken();
+  const headers = await getAuthHeaders(token);
+  return api.get(`/sos/${id}/coordination/`, { headers });
+}
+
+export async function fetchSecurityReportingSummary() {
+  const token = await getStoredToken();
+  const headers = await getAuthHeaders(token);
+  return api.get('/sos/reporting-summary/', { headers });
+}
+
 export async function fetchSosCategories() {
   return api.get('/sos/categories/');
 }

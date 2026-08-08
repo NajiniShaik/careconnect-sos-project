@@ -1,5 +1,4 @@
-from django.shortcuts import render
-
+# django.shortcuts.render not used here
 from django.contrib.auth import authenticate
 # Create your views here.
 from rest_framework import generics
@@ -32,8 +31,6 @@ from rest_framework.decorators import action
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from rest_framework.views import APIView
-from rest_framework.response import Response
-
 from rest_framework.permissions import IsAuthenticated, AllowAny
 
 from .permissions import (
@@ -45,6 +42,9 @@ from .permissions import (
 from rest_framework import viewsets
 from rest_framework.filters import SearchFilter
 from django_filters.rest_framework import DjangoFilterBackend
+from django.db import models
+from rest_framework.pagination import PageNumberPagination
+from django.contrib.auth import get_user_model
 
 
 class RegisterView(generics.CreateAPIView):
@@ -99,6 +99,12 @@ class LoginView(generics.GenericAPIView):
             "refresh": str(refresh),
             "access": str(refresh.access_token),
         })
+
+
+class ContactDirectoryPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = "page_size"
+    max_page_size = 200
     
 class TestResidentAccess(APIView):
     permission_classes = [IsAuthenticated & IsResident]
@@ -422,5 +428,140 @@ class EmergencyContactViewSet(viewsets.ModelViewSet):
             )
         else:
             serializer.save()
+
+
+
+class ContactDirectoryViewSet(viewsets.ReadOnlyModelViewSet):
+    """Society-wide contact directory.
+
+    - Search by username, email, phone
+    - Filter by role
+    - Returns only contacts the caller is permitted to see
+    """
+    serializer_class = None  # set in __init__
+    permission_classes = [IsAuthenticated]
+    pagination_class = ContactDirectoryPagination
+
+    filter_backends = [DjangoFilterBackend, SearchFilter]
+    filterset_fields = ["role"]
+    search_fields = ["username", "email", "phone"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        from .serializers import ContactDirectorySerializer
+        self.serializer_class = ContactDirectorySerializer
+    
+    def get_queryset(self):
+        user = self.request.user
+        User = get_user_model()
+
+        base_qs = (
+            User.objects
+            .filter(role__in=["RESIDENT", "GUARDIAN", "VOLUNTEER", "SECURITY"]) 
+            .select_related(
+                "resident_profile__society",
+                "resident_profile__block",
+                "resident_profile__flat",
+                "volunteer_profile__society",
+                "security_profile__society",
+            )
+        )
+
+        # Helper to detect society for a user from available profiles
+        def _get_user_society(u):
+            try:
+                if getattr(u, "resident_profile", None) and getattr(u.resident_profile, "society", None):
+                    return u.resident_profile.society
+                if getattr(u, "volunteer_profile", None) and getattr(u.volunteer_profile, "society", None):
+                    return u.volunteer_profile.society
+                if getattr(u, "security_profile", None) and getattr(u.security_profile, "society", None):
+                    return u.security_profile.society
+            except Exception:
+                return None
+            return None
+
+        # Determine caller society (if any)
+        caller_society = _get_user_society(user)
+
+        role = str(getattr(user, "role", "") or "").upper()
+
+        try:
+            # Admins: prefer society associated with their profiles; if none, return all
+            if role == "ADMIN":
+                if caller_society:
+                    return base_qs.filter(
+                        models.Q(resident_profile__society=caller_society)
+                        | models.Q(volunteer_profile__society=caller_society)
+                        | models.Q(security_profile__society=caller_society)
+                    )
+                return base_qs
+
+            # Security or Volunteer: see contacts in their society
+            if role in ["SECURITY", "VOLUNTEER"]:
+                if caller_society:
+                    return base_qs.filter(
+                        models.Q(resident_profile__society=caller_society)
+                        | models.Q(volunteer_profile__society=caller_society)
+                        | models.Q(security_profile__society=caller_society)
+                    )
+                return base_qs.none()
+
+            # Resident: see residents, volunteers and security in same society and guardians linked to self
+            if role == "RESIDENT":
+                resident_profile = getattr(user, "resident_profile", None)
+                if resident_profile and resident_profile.society:
+                    society = resident_profile.society
+                    qs = base_qs.filter(
+                        models.Q(resident_profile__society=society)
+                        | models.Q(volunteer_profile__society=society)
+                        | models.Q(security_profile__society=society)
+                    )
+                else:
+                    qs = base_qs.none()
+
+                # include linked guardians for this resident
+                try:
+                    from sos.views import _get_linked_guardians_for_resident
+                    guardians = _get_linked_guardians_for_resident(user)
+                    guardian_ids = [g.id for g in guardians if g]
+                    if guardian_ids:
+                        qs = qs | base_qs.filter(id__in=guardian_ids)
+                except Exception:
+                    pass
+
+                return qs.distinct()
+
+            # Guardian: show linked resident(s) plus society volunteers/security
+            if role == "GUARDIAN":
+                guardian_profile = getattr(user, "guardian_profile", None)
+                qs = base_qs.none()
+                if guardian_profile and getattr(guardian_profile, "resident_name", None):
+                    name = str(guardian_profile.resident_name).strip()
+                    resident_users = User.objects.filter(username__iexact=name)
+                    resident_society = None
+                    if resident_users.exists():
+                        resident_user = resident_users.first()
+                        resident_society = _get_user_society(resident_user)
+                        qs = qs | base_qs.filter(id__in=[u.id for u in resident_users])
+
+                    if resident_society:
+                        qs = qs | base_qs.filter(
+                            models.Q(resident_profile__society=resident_society)
+                            | models.Q(volunteer_profile__society=resident_society)
+                            | models.Q(security_profile__society=resident_society)
+                        )
+
+                return qs.distinct()
+
+        except Exception:
+            return base_qs.none()
+
+        return base_qs.none()
+
+
+class ContactDirectoryPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = "page_size"
+    max_page_size = 200
 
 

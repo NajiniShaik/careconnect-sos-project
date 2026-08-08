@@ -44,6 +44,16 @@ class CommunityBroadcastService:
     def _has_notifications_enabled(self, user):
         return True
 
+    def _is_user_available_for_role(self, user):
+        role = str(getattr(user, "role", "") or "").upper()
+        if role == "VOLUNTEER":
+            volunteer_profile = getattr(user, "volunteer_profile", None)
+            return volunteer_profile is None or bool(getattr(volunteer_profile, "is_available", False))
+        if role == "SECURITY":
+            security_profile = getattr(user, "security_profile", None)
+            return security_profile is None or bool(getattr(security_profile, "is_available", False))
+        return True
+
     def _matches_radius(self, sos, user, radius_meters=None):
         if self.radius_filter is not None:
             return self.radius_filter(sos, user)
@@ -106,7 +116,7 @@ class CommunityBroadcastService:
             except Exception:
                 queryset = queryset.filter(pk__in=[])
 
-        by_role = {}
+        recipients = []
         for user in queryset.order_by("id"):
             if not self._is_active_user(user):
                 continue
@@ -115,26 +125,17 @@ class CommunityBroadcastService:
             if getattr(sos.user, "id", None) is not None and getattr(user, "id", None) == getattr(sos.user, "id", None):
                 continue
             role = str(getattr(user, "role", "") or "").upper()
-            volunteer_profile = getattr(user, "volunteer_profile", None)
-            if role == "VOLUNTEER" and volunteer_profile is not None and not volunteer_profile.is_available:
+            if role in {"VOLUNTEER", "SECURITY"} and not self._is_user_available_for_role(user):
                 continue
             if role in {"VOLUNTEER", "SECURITY"}:
                 inside_radius = self._matches_radius(sos, user, radius_meters=broadcast_radius_meters)
                 if not inside_radius:
                     continue
-            if role not in by_role:
-                by_role[role] = user
+            recipients.append(user)
 
-        if include_residents:
-            for role in ["VOLUNTEER", "SECURITY", "RESIDENT"]:
-                user = by_role.get(role)
-                if user is not None:
-                    recipients.append(user)
-        else:
-            for role in ["VOLUNTEER", "SECURITY"]:
-                user = by_role.get(role)
-                if user is not None:
-                    recipients.append(user)
+        # If include_residents is False, filter out residents from recipients
+        if not include_residents:
+            recipients = [u for u in recipients if str(getattr(u, "role", "") or "").upper() != "RESIDENT"]
 
         return recipients
 
@@ -154,6 +155,13 @@ class CommunityBroadcastService:
         return summary
 
     def _create_notification(self, sos, recipient, role):
+        alert_id = str(sos.id)
+        duplicate_exists = Notification.objects.filter(user=recipient, kind="SOS").filter(
+            Q(data__alert_id=alert_id) | Q(data__alertId=alert_id) | Q(data__alertid=alert_id)
+        ).exists()
+        if duplicate_exists:
+            return None
+
         title = "Community Broadcast"
         body = f"A community broadcast has been sent for SOS {sos.id}."
         notification = Notification.objects.create(
@@ -163,7 +171,7 @@ class CommunityBroadcastService:
             kind="SOS",
             data={
                 "type": "COMMUNITY_BROADCAST",
-                "alert_id": str(sos.id),
+                "alert_id": alert_id,
                 "recipient_role": role,
                 "broadcast": True,
             },
@@ -228,6 +236,8 @@ class CommunityBroadcastService:
             if CommunityBroadcastLog.objects.filter(sos=sos, recipient=recipient, role=role).exists():
                 continue
             notification = self._create_notification(sos, recipient, role)
+            if notification is None:
+                continue
             self._enqueue_for_recipient(sos, recipient, role, notification)
 
         return {

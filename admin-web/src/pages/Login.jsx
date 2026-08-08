@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { loginUser } from "../api/authApi";
 import { useNavigate, Link } from "react-router-dom";
 import "./login.css";
@@ -9,6 +9,15 @@ function Login() {
   const [isLoading, setIsLoading] = useState(false);
   const [feedback, setFeedback] = useState({ type: "", message: "" });
   const navigate = useNavigate();
+  const redirectTimerRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (redirectTimerRef.current) {
+        clearTimeout(redirectTimerRef.current);
+      }
+    };
+  }, []);
 
   const handleLogin = async () => {
     setFeedback({ type: "", message: "" });
@@ -26,7 +35,10 @@ function Login() {
       localStorage.setItem("role", response.data.user.role);
 
       setFeedback({ type: "success", message: "Signed in successfully. Redirecting..." });
-      setTimeout(() => navigate("/dashboard"), 400);
+      if (redirectTimerRef.current) {
+        clearTimeout(redirectTimerRef.current);
+      }
+      redirectTimerRef.current = setTimeout(() => navigate("/dashboard", { replace: true }), 400);
     } catch (error) {
       const message = error.response?.data?.detail || error.response?.data?.message || "Unable to sign in. Please check your email and password.";
       setFeedback({ type: "error", message });

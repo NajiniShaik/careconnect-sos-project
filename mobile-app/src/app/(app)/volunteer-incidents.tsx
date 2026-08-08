@@ -3,6 +3,7 @@ import { ActivityIndicator, Alert, StyleSheet, Switch, Text, View } from "react-
 import { useRouter } from "expo-router";
 import { AppButton, AppScreen, EmptyState, PageHeader, SectionCard, StatusBadge, appColors } from "../../components/common/designSystem";
 import { api, getStoredUser } from "../../services/authService";
+import { fetchSosAlerts, normalizeSosHistory, getSosStatusLabel } from "../../services/sosService";
 
 const AVAILABILITY_ENDPOINT = "/security/availability/";
 
@@ -24,58 +25,6 @@ function formatUpdatedTime(value) {
   return date.toLocaleString();
 }
 
-function normalizeIncident(item) {
-  const data = item?.data || {};
-  const alertId = data?.alert_id || data?.alertId || data?.alertid || null;
-  const rawStatus = data?.status || "Pending";
-
-  return {
-    id: item?.id || alertId || `${Date.now()}`,
-    alertId,
-    notificationId: item?.id || null,
-    residentName: data?.resident_name || data?.residentName || item?.title?.replace("Community Broadcast", "").trim() || "Resident",
-    society: data?.society_name || data?.societyName || "Unknown society",
-    blockFlat: data?.block_flat || data?.blockFlat || data?.location || "Not provided",
-    sosType: data?.sos_type || data?.sosType || data?.type || "Community broadcast",
-    time: item?.received_at || item?.created_at || null,
-    distance: data?.distance_meters != null ? `${Math.round(Number(data.distance_meters))} m` : data?.distance || null,
-    status: rawStatus,
-    message: item?.body || "Community broadcast incident",
-  };
-}
-
-async function enrichIncidentWithSosDetails(incident) {
-  if (!incident.alertId) {
-    return { ...incident, accepted: false };
-  }
-
-  try {
-    const [detailResponse, statusResponse] = await Promise.all([
-      api.get(`/sos/${incident.alertId}/`),
-      api.get(`/sos/${incident.alertId}/status/`).catch(() => null),
-    ]);
-    const detail = detailResponse?.data || {};
-    const statusDetail = statusResponse?.data || {};
-    const currentStatus = statusDetail?.current_status || detail?.status || incident.status;
-    const accepted = currentStatus === "VOLUNTEER_ACCEPTED" || currentStatus === "SECURITY_RESPONDED";
-    const residentName = detail?.user?.username || detail?.user?.email || incident.residentName;
-    const locationText = detail?.address || detail?.location || detail?.city || incident.blockFlat;
-
-    return {
-      ...incident,
-      residentName,
-      society: detail?.city || detail?.state || incident.society,
-      blockFlat: locationText || incident.blockFlat,
-      sosType: detail?.category || incident.sosType,
-      time: detail?.created_at || incident.time,
-      status: currentStatus || incident.status,
-      message: detail?.message || incident.message,
-      accepted,
-    };
-  } catch {
-    return { ...incident, accepted: false };
-  }
-}
 
 export default function VolunteerIncidentsRoute() {
   const router = useRouter();
@@ -86,6 +35,7 @@ export default function VolunteerIncidentsRoute() {
   const [incidents, setIncidents] = useState([]);
   const [loadingIncidents, setLoadingIncidents] = useState(true);
   const [userRole, setUserRole] = useState(null);
+  const [currentUserId, setCurrentUserId] = useState(null);
 
   const loadAvailability = useCallback(async () => {
     try {
@@ -107,15 +57,10 @@ export default function VolunteerIncidentsRoute() {
   const loadIncidents = useCallback(async () => {
     try {
       setLoadingIncidents(true);
-      const response = await api.get("/notifications/notifications/");
-      const items = Array.isArray(response?.data) ? response.data : [];
-      const broadcastItems = items.filter((item) => {
-        const data = item?.data || {};
-        return data?.type === "COMMUNITY_BROADCAST" || data?.broadcast === true || data?.recipient_role === "VOLUNTEER";
-      });
-      const normalizedIncidents = broadcastItems.map(normalizeIncident);
-      const enrichedIncidents = await Promise.all(normalizedIncidents.map((incident) => enrichIncidentWithSosDetails(incident)));
-      setIncidents(enrichedIncidents);
+      const response = await fetchSosAlerts();
+      const alerts = Array.isArray(response?.data) ? response.data : [];
+      const normalizedIncidents = normalizeSosHistory(alerts);
+      setIncidents(normalizedIncidents);
     } catch (error) {
       const detail = error?.response?.data?.detail || "Unable to load broadcast incidents right now.";
       setAvailabilityFeedback(detail);
@@ -132,6 +77,7 @@ export default function VolunteerIncidentsRoute() {
       const currentUser = await getStoredUser();
       if (mounted) {
         setUserRole(currentUser?.role || null);
+        setCurrentUserId(currentUser?.id || null);
       }
       await Promise.all([loadAvailability(), loadIncidents()]);
     };
@@ -195,8 +141,17 @@ export default function VolunteerIncidentsRoute() {
   };
 
   const handleViewDetails = (incident) => {
+    console.log("[volunteer-incidents] View details", {
+      role: normalizedRole,
+      alertId: incident?.alertId,
+      id: incident?.id,
+      assignedVolunteerId: incident?.assigned_volunteer_id || incident?.assigned_volunteer,
+      status: incident?.status,
+      current_status: incident?.current_status,
+    });
+
     if (incident.alertId) {
-      router.push(`/alerts?alert_id=${incident.alertId}`);
+      router.push({ pathname: "/incident-updates", params: { incident_id: incident.alertId } });
       return;
     }
     router.push("/notifications");
@@ -205,15 +160,16 @@ export default function VolunteerIncidentsRoute() {
   const normalizedRole = String(userRole || "").toUpperCase();
   const isVolunteer = normalizedRole === "VOLUNTEER";
   const isSecurity = normalizedRole === "SECURITY";
-  const isAllowedRole = isVolunteer || isSecurity;
+  const isAdmin = normalizedRole === "ADMIN";
+  const isAllowedRole = isVolunteer || isSecurity || isAdmin;
 
-  // Access guard: show access denied if user role is known and not VOLUNTEER or SECURITY
+  // Access guard: allow volunteers, security, and admins to monitor community incidents
   if (userRole && !isAllowedRole) {
     return (
       <AppScreen>
         <EmptyState
           title="Access denied"
-          message="Volunteer incidents are available to volunteers and security only."
+          message="Volunteer incidents are available to volunteers, security, and admins only."
           icon="shield-outline"
           action={<AppButton title="Return to notifications" onPress={() => router.push("/notifications")} variant="secondary" />}
         />
@@ -221,7 +177,7 @@ export default function VolunteerIncidentsRoute() {
     );
   }
 
-  const pageTitle = isSecurity ? "Security Incidents" : "Volunteer Incidents";
+  const pageTitle = isSecurity ? "Security Incidents" : isAdmin ? "Community Incidents" : "Volunteer Incidents";
   const pageSubtitle = isSecurity
     ? "Monitor community broadcast incidents and coordinate security response."
     : "Stay available, review community broadcast incidents, and respond quickly.";
@@ -275,44 +231,69 @@ export default function VolunteerIncidentsRoute() {
 
         {!loadingIncidents && incidents.length > 0 ? (
           incidents.map((incident) => {
-            const accepted = Boolean(incident.accepted);
-            return (
-              <View key={incident.id} style={styles.incidentCard}>
-                <View style={styles.incidentHeaderRow}>
-                  <View style={styles.incidentTitleWrap}>
-                    <Text style={styles.incidentResident}>{incident.residentName}</Text>
-                    <Text style={styles.incidentMeta}>{incident.society} • {incident.blockFlat}</Text>
+              // Determine assigned state from backend-provided field
+              const assignedId = incident.assigned_volunteer_id || incident.assigned_volunteer || null;
+              const assignedName = incident.assigned_volunteer_name || '';
+              const isAssigned = assignedId !== null && assignedId !== undefined && assignedId !== '';
+              const isAssignedToMe = isAssigned && currentUserId && Number(currentUserId) === Number(assignedId);
+
+              const statusLabel = getSosStatusLabel(incident.status) || (isAssigned ? 'Accepted' : (incident.status || 'Pending'));
+
+              // Build meta without stray bullets
+              const metaParts = [];
+              if (incident.society) metaParts.push(incident.society);
+              if (incident.blockFlat) metaParts.push(incident.blockFlat);
+
+              return (
+                <View key={incident.id} style={styles.incidentCard}>
+                  <View style={styles.incidentHeaderRow}>
+                    <View style={styles.incidentTitleWrap}>
+                      <Text style={styles.incidentResident}>{incident.residentName || incident.user || ''}</Text>
+                      {metaParts.length > 0 ? <Text style={styles.incidentMeta}>{metaParts.join(' • ')}</Text> : null}
+                    </View>
+                    <StatusBadge label={statusLabel} tone={isAssigned ? 'success' : 'warning'} compact />
                   </View>
-                  <StatusBadge label={accepted ? "Accepted" : incident.status || "Pending"} tone={accepted ? "success" : "warning"} compact />
+
+                  <View style={styles.incidentDetailsRow}>
+                    <View style={styles.incidentDetailBlock}>
+                      <Text style={styles.incidentLabel}>SOS type</Text>
+                      <Text style={styles.incidentValue}>{incident.sosType || ''}</Text>
+                    </View>
+                    <View style={styles.incidentDetailBlock}>
+                      <Text style={styles.incidentLabel}>Time</Text>
+                      <Text style={styles.incidentValue}>{formatRelativeTime(incident.time)}</Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.incidentDetailsRow}>
+                    <View style={styles.incidentDetailBlock}>
+                      <Text style={styles.incidentLabel}>Location</Text>
+                      <Text style={styles.incidentValue}>{incident.address || incident.location || ''}</Text>
+                    </View>
+                    <View style={styles.incidentDetailBlock}>
+                      <Text style={styles.incidentLabel}>Distance</Text>
+                      <Text style={styles.incidentValue}>{incident.distance != null ? String(incident.distance) : ''}</Text>
+                    </View>
+                  </View>
+
+                  {incident.message ? <Text style={styles.incidentMessage}>{incident.message}</Text> : null}
+
+                  <View style={styles.incidentActions}>
+                    {isAssigned ? (
+                      isAssignedToMe ? (
+                        <AppButton title={`Assigned to you`} onPress={() => handleViewDetails(incident)} variant="primary" style={styles.actionButton} />
+                      ) : (
+                        <AppButton title={`Assigned`} onPress={() => {}} disabled variant="secondary" style={styles.actionButton} />
+                      )
+                    ) : (
+                      <AppButton title={`Accept incident`} onPress={() => handleAcceptIncident(incident)} loading={false} variant="primary" style={styles.actionButton} />
+                    )}
+
+                    <AppButton title="View details" onPress={() => handleViewDetails(incident)} variant="secondary" style={styles.actionButton} />
+                  </View>
                 </View>
-                <View style={styles.incidentDetailsRow}>
-                  <View style={styles.incidentDetailBlock}>
-                    <Text style={styles.incidentLabel}>SOS type</Text>
-                    <Text style={styles.incidentValue}>{incident.sosType}</Text>
-                  </View>
-                  <View style={styles.incidentDetailBlock}>
-                    <Text style={styles.incidentLabel}>Time</Text>
-                    <Text style={styles.incidentValue}>{formatRelativeTime(incident.time)}</Text>
-                  </View>
-                </View>
-                <View style={styles.incidentDetailsRow}>
-                  <View style={styles.incidentDetailBlock}>
-                    <Text style={styles.incidentLabel}>Distance</Text>
-                    <Text style={styles.incidentValue}>{incident.distance || "Not available"}</Text>
-                  </View>
-                  <View style={styles.incidentDetailBlock}>
-                    <Text style={styles.incidentLabel}>Status</Text>
-                    <Text style={styles.incidentValue}>{incident.status || "Pending"}</Text>
-                  </View>
-                </View>
-                <Text style={styles.incidentMessage}>{incident.message}</Text>
-                <View style={styles.incidentActions}>
-                  <AppButton title={accepted ? "Accepted" : "Accept incident"} onPress={() => handleAcceptIncident(incident)} loading={false} variant={accepted ? "secondary" : "primary"} style={styles.actionButton} />
-                  <AppButton title="View details" onPress={() => handleViewDetails(incident)} variant="secondary" style={styles.actionButton} />
-                </View>
-              </View>
-            );
-          })
+              );
+            })
         ) : null}
       </SectionCard>
     </AppScreen>
@@ -351,6 +332,19 @@ const styles = StyleSheet.create({
   incidentLabel: { fontSize: 12, fontWeight: "700", color: appColors.muted, textTransform: "uppercase" },
   incidentValue: { marginTop: 4, color: appColors.navy, fontSize: 14, fontWeight: "600" },
   incidentMessage: { marginTop: 12, color: appColors.slate, lineHeight: 20 },
-  incidentActions: { flexDirection: "row", gap: 10, marginTop: 12, flexWrap: "wrap" },
-  actionButton: { flex: 1, minWidth: 140 },
+  incidentActions: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 10,
+    marginTop: 12,
+    flexWrap: "wrap",
+  },
+  actionButton: {
+    minWidth: 116,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    alignSelf: "center",
+    flexShrink: 1,
+  },
 });

@@ -5,15 +5,21 @@ import sys
 import requests
 from pathlib import Path
 from typing import Optional
-from huggingface_hub import InferenceClient
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
-client = InferenceClient(
-    provider="fal-ai",
-    api_key=settings.HF_API_KEY
-)
+try:
+    from huggingface_hub import InferenceClient
+except ImportError:
+    InferenceClient = None
+
+client = None
+if InferenceClient is not None:
+    client = InferenceClient(
+        provider="fal-ai",
+        api_key=settings.HF_API_KEY
+    )
 
 HF_MODEL="openai/whisper-tiny"
 

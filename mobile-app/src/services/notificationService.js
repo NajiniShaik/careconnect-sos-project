@@ -584,7 +584,13 @@ export async function registerDeviceWithBackend({ token, platform, device_id }) 
       return { skipped: true, reason: "missing-auth-header" };
     }
 
-    const normalizedPlatform = (typeof platform === "string" && platform ? String(platform) : (Device.osName || Platform.OS || "unknown")).toLowerCase();
+    const normalizedPlatform = Platform.OS === "android"
+      ? "android"
+      : Platform.OS === "ios"
+        ? "ios"
+        : Platform.OS === "web"
+          ? "web"
+          : "android";
     const payload = { device_token: normalizedToken, platform: normalizedPlatform, device_id };
     console.log("[notification] posting device registration payload", payload);
 
@@ -621,17 +627,24 @@ export async function registerDeviceWithBackend({ token, platform, device_id }) 
 }
 
 export async function ensureDeviceRegistration() {
+  console.log("[notification][debug] entered ensureDeviceRegistration");
+
   if (REGISTRATION_STATE.loggedOut) {
+    console.log("[notification][debug] returning early: logged-out");
     return { skipped: true, reason: "logged-out" };
   }
 
   const authToken = await getStoredToken();
+  console.log("[notification][debug] stored auth token exists", { hasAuthToken: Boolean(authToken) });
   if (!authToken) {
+    console.log("[notification][debug] returning early: not-authenticated");
     return { skipped: true, reason: "not-authenticated" };
   }
 
   const currentUser = await getStoredUser();
+  console.log("[notification][debug] stored user exists", { hasUser: Boolean(currentUser?.id), userId: currentUser?.id || null });
   if (!currentUser?.id) {
+    console.log("[notification][debug] returning early: missing-user-id");
     return { skipped: true, reason: "missing-user-id" };
   }
 
@@ -641,11 +654,14 @@ export async function ensureDeviceRegistration() {
   await ensureNotificationCategories();
 
   const permission = await requestNotificationPermission();
+  console.log("[notification][debug] notification permission result", permission);
   if (permission?.status !== "granted") {
+    console.log("[notification][debug] returning early: permission-not-granted");
     return { skipped: true, reason: "permission-not-granted", permission };
   }
 
   const deviceToken = await getDevicePushTokenAsync();
+  console.log("[notification][debug] push token result", { hasPushToken: Boolean(deviceToken), tokenPreview: deviceToken ? `${deviceToken.slice(0, 8)}...` : null });
   console.log("[notification] ensureDeviceRegistration runtime", {
     isExpoGo: IS_EXPO_GO,
     isWeb: isWeb(),
@@ -655,12 +671,21 @@ export async function ensureDeviceRegistration() {
     deviceToken: deviceToken ? `${deviceToken.slice(0, 8)}...` : null,
   });
   if (!deviceToken) {
+    console.log("[notification][debug] returning early: missing-token");
     return { skipped: true, reason: "missing-token" };
   }
 
   const platform = (Device.osName || Platform.OS || "unknown").toLowerCase();
   const deviceId = await getNotificationDeviceId();
-  return registerDeviceWithBackend({ token: deviceToken, platform, device_id: deviceId });
+  console.log("[notification][debug] about to call registerDeviceWithBackend", { deviceId, platform });
+  try {
+    const result = await registerDeviceWithBackend({ token: deviceToken, platform, device_id: deviceId });
+    console.log("[notification][debug] registerDeviceWithBackend completed", result);
+    return result;
+  } catch (error) {
+    console.log("[notification][debug] registerDeviceWithBackend threw", error);
+    throw error;
+  }
 }
 
 export async function retryPendingDeviceRegistration() {
@@ -762,17 +787,39 @@ export async function loadLocalNotifications() {
   }
 }
 
+export function updateNotificationReadState(list, id) {
+  const normalizedList = Array.isArray(list) ? list : [];
+  const targetId = id == null ? null : String(id);
+  if (!targetId) {
+    return normalizedList;
+  }
+
+  const next = normalizedList.map((notification) => (
+    String(notification?.id) === targetId ? { ...notification, read: true } : notification
+  ));
+
+  if (next.every((notification, index) => notification === normalizedList[index])) {
+    return normalizedList;
+  }
+
+  return next;
+}
+
 export async function markNotificationRead(id) {
   try {
     const token = await getStoredTokenFromAnywhere();
     if (!token) {
-      return loadLocalNotifications();
+      const local = await loadLocalNotifications();
+      const next = updateNotificationReadState(local, id);
+      setStorageKeyValue(STORAGE_KEY, next);
+      emitNotificationUpdate(next);
+      return next;
     }
 
     const headers = await getAuthHeaders(token);
     await api.post(`/notifications/notifications/${id}/read/`, {}, { headers });
     const list = await loadLocalNotifications();
-    const next = list.map((n) => (n.id === id ? { ...n, read: true } : n));
+    const next = updateNotificationReadState(list, id);
     setStorageKeyValue(STORAGE_KEY, next);
     emitNotificationUpdate(next);
     return next;
@@ -831,6 +878,23 @@ export async function deleteNotification(id) {
   }
 }
 
+export async function broadcastSosAlert(sosId, includeResidents = false) {
+  const token = await getStoredTokenFromAnywhere();
+  if (!token) {
+    throw new Error("Missing authentication token");
+  }
+
+  const headers = await getAuthHeaders(token);
+  return api.post(
+    "/notifications/community-broadcast/",
+    {
+      sos_id: sosId,
+      include_residents: includeResidents,
+    },
+    { headers }
+  );
+}
+
 export default {
   requestNotificationPermission,
   getNotificationPermissionStatus,
@@ -852,7 +916,9 @@ export default {
   loadLocalNotifications,
   subscribeToNotificationUpdates,
   fetchNotificationsFromBackend,
+  updateNotificationReadState,
   markNotificationRead,
   markAllRead,
   deleteNotification,
+  broadcastSosAlert,
 };

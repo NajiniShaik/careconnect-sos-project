@@ -12,6 +12,7 @@ import {
   markAllRead,
   requestNotificationPermission,
   deleteNotification,
+  markNotificationRead,
 } from "../../services/notificationService";
 
 const FILTER_OPTIONS = [
@@ -181,7 +182,17 @@ export default function NotificationsRoute() {
     return (
       <Pressable
         key={item.id}
-        onPress={() => {
+        onPress={async () => {
+          if (!item?.id) {
+            return;
+          }
+
+          try {
+            await markNotificationRead(item.id);
+          } catch {
+            // ignore read-state update failures and continue routing
+          }
+
           if (item.data?.target) {
             router.push(item.data.target);
           } else if (item.data?.type === "COMMUNITY_BROADCAST" || item.data?.broadcast === true) {

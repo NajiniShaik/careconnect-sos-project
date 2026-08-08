@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from "react";
 import { Animated, Easing, Linking, Pressable, StyleSheet, Text, View } from "react-native";
-import { AppIcon, AppScreen, PageHeader, SectionCard, StatusBadge, appColors } from "../../components/common/designSystem";
+import { useRouter } from "expo-router";
+import { AppIcon, AppScreen, PageHeader, SectionCard, StatusBadge, AppButton, appColors } from "../../components/common/designSystem";
 import SosWorkflowWizard from "../../components/sos/SosWorkflowWizard";
 import { getStoredUser } from "../../services/authService";
 
 export default function Dashboard() {
+  const router = useRouter();
   const [user, setUser] = useState(null);
   const [showWizard, setShowWizard] = useState(false);
   const [pulseScale] = useState(new Animated.Value(1));
@@ -120,6 +122,10 @@ export default function Dashboard() {
             <AppIcon name="time-outline" size={16} color={appColors.blue} />
           </Pressable>
         </View>
+      </SectionCard>
+
+      <SectionCard title="Contacts" subtitle="Browse society members and emergency contacts">
+        <AppButton title="Open contact directory" onPress={() => router.push("/contact-directory")} />
       </SectionCard>
     </AppScreen>
   );

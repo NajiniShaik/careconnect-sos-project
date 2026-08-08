@@ -145,6 +145,15 @@ export default function SecurityIncidentScreen() {
   };
 
   const handleRespond = () => {
+    console.log("[security-incidents] View details", {
+      role: userRole,
+      alertId: incident?.alertId,
+      id: incident?.id,
+      assignedVolunteerId: incident?.assigned_volunteer_id || incident?.assigned_volunteer,
+      status: incident?.status,
+      current_status: incident?.current_status,
+    });
+
     if (incident?.alertId) {
       router.push(`/alerts?alert_id=${incident.alertId}`);
       return;
@@ -153,6 +162,15 @@ export default function SecurityIncidentScreen() {
   };
 
   const handleViewResidentDetails = () => {
+    console.log("[security-incidents] View details", {
+      role: userRole,
+      alertId: incident?.alertId,
+      id: incident?.id,
+      assignedVolunteerId: incident?.assigned_volunteer_id || incident?.assigned_volunteer,
+      status: incident?.status,
+      current_status: incident?.current_status,
+    });
+
     if (incident?.alertId) {
       router.push(`/alerts?alert_id=${incident.alertId}`);
       return;
@@ -162,8 +180,8 @@ export default function SecurityIncidentScreen() {
 
   return (
     <AppScreen>
-      {/* Access guard: only SECURITY role may view this screen */}
-      {userRole && userRole !== "SECURITY" ? (
+      {/* Access guard: allow SECURITY and ADMIN roles to view this screen */}
+      {userRole && userRole !== "SECURITY" && userRole !== "ADMIN" ? (
         <EmptyState
           title="Access denied"
           message="This screen is available to security personnel only."

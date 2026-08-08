@@ -292,6 +292,9 @@ export default function AppLayout() {
       />
         <Tabs.Screen name="emergency-chat" options={{ href: null }} />
       <Tabs.Screen name="security-incidents" options={{ href: null }} />
+        <Tabs.Screen name="security-coordination" options={{ href: null }} />
+        <Tabs.Screen name="security-updates" options={{ href: null }} />
+        <Tabs.Screen name="security-reporting" options={{ href: null }} />
       <Tabs.Screen name="volunteer-incidents" options={{ href: null }} />
     </Tabs>
   );

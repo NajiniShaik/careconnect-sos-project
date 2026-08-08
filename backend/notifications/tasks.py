@@ -1,7 +1,22 @@
+import functools
 import logging
 from datetime import timedelta
 
-from celery import shared_task
+try:
+    from celery import shared_task
+except ImportError:
+    def shared_task(*args, **kwargs):
+        def decorator(func):
+            @functools.wraps(func)
+            def wrapper(*f_args, **f_kwargs):
+                return func(*f_args, **f_kwargs)
+
+            wrapper.delay = wrapper
+            wrapper.apply_async = wrapper
+            return wrapper
+
+        return decorator
+
 from django.utils import timezone
 
 from notifications.models import EscalationConfiguration, EscalationLog, Notification, NotificationDelivery

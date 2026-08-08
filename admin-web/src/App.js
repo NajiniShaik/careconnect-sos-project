@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Dashboard from "./pages/Dashboard";
+import ReportingDashboard from "./pages/ReportingDashboard";
 import ProtectedRoute from "./routes/ProtectedRoute";
 import SocietyManagement from "./pages/SocietyManagement";
 import BlockManagement from "./pages/BlockManagement";
@@ -119,6 +120,15 @@ function App() {
         element={
           <ProtectedRoute>
             <Dashboard />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/reporting"
+        element={
+          <ProtectedRoute requiredRole="ADMIN">
+            <ReportingDashboard />
           </ProtectedRoute>
         }
       />

@@ -13,7 +13,11 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 from pathlib import Path
 
 import os
-from celery.schedules import crontab
+try:
+    from celery.schedules import crontab
+except Exception:
+    # Allow environments without Celery installed to import settings for tests
+    crontab = None
 from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -58,6 +62,7 @@ INSTALLED_APPS = [
     'corsheaders',
 
     # third-party
+    'channels',
     'rest_framework',
     'rest_framework_simplejwt.token_blacklist',
     'drf_yasg',
@@ -100,7 +105,13 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'config.wsgi.application'
+ASGI_APPLICATION = 'config.asgi.application'
 
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels.layers.InMemoryChannelLayer',
+    },
+}
 
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
@@ -202,9 +213,12 @@ CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'Asia/Kolkata'  # or your preferred timezone
-CELERY_BEAT_SCHEDULE = {
-    'process-guardian-escalation': {
-        'task': 'notifications.process_guardian_escalation_task',
-        'schedule': crontab(minute='*'),
-    },
-}
+if crontab is not None:
+    CELERY_BEAT_SCHEDULE = {
+        'process-guardian-escalation': {
+            'task': 'notifications.process_guardian_escalation_task',
+            'schedule': crontab(minute='*'),
+        },
+    }
+else:
+    CELERY_BEAT_SCHEDULE = {}

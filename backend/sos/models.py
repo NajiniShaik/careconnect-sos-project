@@ -82,23 +82,39 @@ class SOS(models.Model):
         if not new_status:
             return False
 
-        current = (self.status or "OPEN").upper()
+        stored_status = (self.status or "OPEN").upper()
+        current = (self.get_current_lifecycle_status() or stored_status).upper()
         target = str(new_status).upper()
 
-        if current == target:
+        if stored_status in {"RESOLVED", "CLOSED"}:
+            effective_current = stored_status
+        else:
+            effective_current = {
+                "TRIGGERED": "OPEN",
+                "GUARDIAN_NOTIFIED": "OPEN",
+                "GUARDIAN_RESPONDED": "OPEN",
+                "VOLUNTEER_NOTIFIED": "OPEN",
+                "VOLUNTEER_ACCEPTED": "ACTIVE",
+                "SECURITY_NOTIFIED": "ACTIVE",
+                "SECURITY_RESPONDED": "ACTIVE",
+                "AUTO_ESCALATED": "ESCALATED",
+                "INCIDENT_CLOSED": "CLOSED",
+            }.get(current, current)
+
+        if effective_current == target:
             return True
 
         # Define allowed forward-only transitions
         allowed = {
             "OPEN": {"ACTIVE", "IN_PROGRESS", "ESCALATED", "RESOLVED", "CLOSED"},
-            "IN_PROGRESS": {"ACTIVE", "ESCALATED", "RESOLVED", "CLOSED"},
-            "ACTIVE": {"ESCALATED", "RESOLVED", "CLOSED"},
+            "IN_PROGRESS": {"ACTIVE", "IN_PROGRESS", "ESCALATED", "RESOLVED", "CLOSED"},
+            "ACTIVE": {"ACTIVE", "IN_PROGRESS", "ESCALATED", "RESOLVED", "CLOSED"},
             "ESCALATED": {"RESOLVED", "CLOSED"},
             "RESOLVED": {"CLOSED"},
             "CLOSED": set(),
         }
 
-        return target in allowed.get(current, set())
+        return target in allowed.get(effective_current, set())
 
     def record_status_event(self, status, details="", occurred_at=None):
         event = SOSStatusEvent.objects.create(

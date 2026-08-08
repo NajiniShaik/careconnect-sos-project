@@ -10,9 +10,12 @@ from django.db.models import Q
 # render not used
 from django.contrib.auth import get_user_model
 from django.core.paginator import Paginator
+from django.http import HttpResponse
 from django.utils import timezone
+from django.utils.html import escape
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import status, viewsets
+from django.db.models import Count
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -1554,3 +1557,330 @@ class SOSAlertManagementView(APIView):
             return Response(status=status.HTTP_204_NO_CONTENT)
 
         return Response(status=status.HTTP_403_FORBIDDEN)
+
+
+def _get_admin_reporting_queryset(request):
+    qs = SOS.objects.all().select_related("user")
+
+    date_from = request.query_params.get("start_date") or request.query_params.get("date_from")
+    date_to = request.query_params.get("end_date") or request.query_params.get("date_to")
+    if date_from:
+        qs = qs.filter(created_at__date__gte=date_from)
+    if date_to:
+        qs = qs.filter(created_at__date__lte=date_to)
+
+    society = request.query_params.get("society")
+    if society:
+        if str(society).isdigit():
+            qs = qs.filter(user__resident_profile__society__id=int(society))
+        else:
+            qs = qs.filter(user__resident_profile__society__name__icontains=society)
+
+    category = request.query_params.get("category") or request.query_params.get("incident_type")
+    if category:
+        qs = qs.filter(category__icontains=category)
+
+    return qs
+
+
+def _build_admin_report_payload(qs):
+    total_incidents = qs.count()
+    active_incidents = 0
+    escalated_incidents = 0
+    resolved_incidents = 0
+
+    category_counts_qs = qs.values("category").annotate(count=Count("id"))
+    category_counts = {c["category"] or "": c["count"] for c in category_counts_qs}
+
+    society_counts = {}
+    guardian_times = []
+    volunteer_times = []
+    security_times = []
+    total_resolution_times = []
+
+    for sos in qs.order_by("id"):
+        current_status = sos.get_current_lifecycle_status()
+        status_field = str(getattr(sos, "status", "") or "").upper()
+        if current_status == "INCIDENT_CLOSED" or status_field in {"RESOLVED", "CLOSED"}:
+            resolved_incidents += 1
+        else:
+            active_incidents += 1
+            if status_field == "ESCALATED" or current_status == "AUTO_ESCALATED":
+                escalated_incidents += 1
+
+        try:
+            soc = getattr(getattr(sos.user, "resident_profile", None), "society", None)
+            soc_name = getattr(soc, "name", None) or "<unknown>"
+        except Exception:
+            soc_name = "<unknown>"
+
+        entry = society_counts.get(soc_name) or {"total": 0, "active": 0, "escalated": 0, "resolved": 0}
+        entry["total"] += 1
+        if current_status == "INCIDENT_CLOSED" or status_field in {"RESOLVED", "CLOSED"}:
+            entry["resolved"] += 1
+        else:
+            entry["active"] += 1
+            if status_field == "ESCALATED" or current_status == "AUTO_ESCALATED":
+                entry["escalated"] += 1
+        society_counts[soc_name] = entry
+
+        timeline = list(sos.get_status_timeline())
+        created_at = sos.created_at
+        if created_at is None:
+            continue
+
+        guardian_response_seconds = None
+        volunteer_response_seconds = None
+        security_response_seconds = None
+        total_resolution_seconds = None
+
+        for event in timeline:
+            if event.status == "GUARDIAN_RESPONDED" and guardian_response_seconds is None:
+                guardian_response_seconds = int((event.occurred_at - created_at).total_seconds())
+            if event.status == "VOLUNTEER_ACCEPTED" and volunteer_response_seconds is None:
+                volunteer_response_seconds = int((event.occurred_at - created_at).total_seconds())
+            if event.status == "SECURITY_RESPONDED" and security_response_seconds is None:
+                security_response_seconds = int((event.occurred_at - created_at).total_seconds())
+            if event.status == "INCIDENT_CLOSED" and total_resolution_seconds is None:
+                total_resolution_seconds = int((event.occurred_at - created_at).total_seconds())
+
+        if guardian_response_seconds is not None:
+            guardian_times.append(guardian_response_seconds)
+        if volunteer_response_seconds is not None:
+            volunteer_times.append(volunteer_response_seconds)
+        if security_response_seconds is not None:
+            security_times.append(security_response_seconds)
+        if total_resolution_seconds is not None:
+            total_resolution_times.append(total_resolution_seconds)
+
+    def avg_or_none(lst):
+        return int(sum(lst) / len(lst)) if lst else None
+
+    response_time_summary = {
+        "guardian_response_seconds_avg": avg_or_none(guardian_times),
+        "volunteer_response_seconds_avg": avg_or_none(volunteer_times),
+        "security_response_seconds_avg": avg_or_none(security_times),
+        "total_resolution_seconds_avg": avg_or_none(total_resolution_times),
+        "counts": {
+            "with_guardian_response": len(guardian_times),
+            "with_volunteer_response": len(volunteer_times),
+            "with_security_response": len(security_times),
+            "with_total_resolution": len(total_resolution_times),
+        },
+    }
+
+    return {
+        "total_incidents": total_incidents,
+        "active_incidents": active_incidents,
+        "escalated_incidents": escalated_incidents,
+        "resolved_incidents": resolved_incidents,
+        "category_counts": category_counts,
+        "society_counts": society_counts,
+        "response_time_summary": response_time_summary,
+    }
+
+
+def _render_reporting_excel(payload):
+    def text_cell(text):
+        return escape(str(text) if text is not None else "")
+
+    html_lines = [
+        "<html>",
+        "<head><meta http-equiv=\"content-type\" content=\"text/html; charset=utf-8\"/></head>",
+        "<body>",
+        "<h2>SOS Reporting Export</h2>",
+    ]
+
+    html_lines.append("<table border=\"1\" cellpadding=\"4\" cellspacing=\"0\">")
+    html_lines.append("<tr><th>Metric</th><th>Value</th></tr>")
+    html_lines.append(f"<tr><td>Total Incidents</td><td>{text_cell(payload['total_incidents'])}</td></tr>")
+    html_lines.append(f"<tr><td>Active Incidents</td><td>{text_cell(payload['active_incidents'])}</td></tr>")
+    html_lines.append(f"<tr><td>Escalated Incidents</td><td>{text_cell(payload['escalated_incidents'])}</td></tr>")
+    html_lines.append(f"<tr><td>Resolved Incidents</td><td>{text_cell(payload['resolved_incidents'])}</td></tr>")
+    html_lines.append("</table><br/>")
+
+    html_lines.append("<h3>Category Counts</h3>")
+    html_lines.append("<table border=\"1\" cellpadding=\"4\" cellspacing=\"0\">")
+    html_lines.append("<tr><th>Category</th><th>Count</th></tr>")
+    if payload["category_counts"]:
+        for category, count in payload["category_counts"].items():
+            html_lines.append(f"<tr><td>{text_cell(category or '(blank)')}</td><td>{text_cell(count)}</td></tr>")
+    else:
+        html_lines.append("<tr><td colspan=\"2\">(none)</td></tr>")
+    html_lines.append("</table><br/>")
+
+    html_lines.append("<h3>Society Counts</h3>")
+    html_lines.append("<table border=\"1\" cellpadding=\"4\" cellspacing=\"0\">")
+    html_lines.append("<tr><th>Society</th><th>Total</th><th>Active</th><th>Escalated</th><th>Resolved</th></tr>")
+    if payload["society_counts"]:
+        for society_name, counts in payload["society_counts"].items():
+            html_lines.append(
+                f"<tr><td>{text_cell(society_name)}</td><td>{text_cell(counts['total'])}</td>"
+                f"<td>{text_cell(counts['active'])}</td><td>{text_cell(counts['escalated'])}</td>"
+                f"<td>{text_cell(counts['resolved'])}</td></tr>"
+            )
+    else:
+        html_lines.append("<tr><td colspan=\"5\">(none)</td></tr>")
+    html_lines.append("</table><br/>")
+
+    html_lines.append("<h3>Response Time Summary</h3>")
+    html_lines.append("<table border=\"1\" cellpadding=\"4\" cellspacing=\"0\">")
+    html_lines.append("<tr><th>Metric</th><th>Value</th></tr>")
+    summary = payload["response_time_summary"]
+    html_lines.append(f"<tr><td>Guardian Response Avg (sec)</td><td>{text_cell(summary['guardian_response_seconds_avg'])}</td></tr>")
+    html_lines.append(f"<tr><td>Volunteer Response Avg (sec)</td><td>{text_cell(summary['volunteer_response_seconds_avg'])}</td></tr>")
+    html_lines.append(f"<tr><td>Security Response Avg (sec)</td><td>{text_cell(summary['security_response_seconds_avg'])}</td></tr>")
+    html_lines.append(f"<tr><td>Total Resolution Avg (sec)</td><td>{text_cell(summary['total_resolution_seconds_avg'])}</td></tr>")
+    for label, value in summary["counts"].items():
+        html_lines.append(f"<tr><td>{text_cell(label.replace('_', ' ').title())}</td><td>{text_cell(value)}</td></tr>")
+    html_lines.append("</table>")
+
+    html_lines.append("</body>")
+    html_lines.append("</html>")
+    return "\n".join(html_lines).encode("utf-8")
+
+
+def _pdf_escape(text):
+    text = str(text) if text is not None else ""
+    return text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
+def _build_pdf_bytes(lines):
+    body_lines = ["BT /F1 10 Tf 50 820 Td"]
+    for index, line in enumerate(lines):
+        if index > 0:
+            body_lines.append("0 -14 Td")
+        body_lines.append(f"({_pdf_escape(line)}) Tj")
+    body_lines.append("ET")
+    body = "\n".join(body_lines).encode("latin-1", "replace")
+
+    objects = []
+    offsets = []
+
+    catalog = b"1 0 obj << /Type /Catalog /Pages 2 0 R >>\nendobj\n"
+    pages = b"2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"
+    page = b"3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>\nendobj\n"
+    contents = b"4 0 obj << /Length " + str(len(body)).encode("ascii") + b" >>\nstream\n" + body + b"\nendstream\nendobj\n"
+    font = b"5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Courier >>\nendobj\n"
+
+    objects = [catalog, pages, page, contents, font]
+    pdf = [b"%PDF-1.4\n"]
+    position = len(pdf[0])
+    for obj in objects:
+        offsets.append(position)
+        pdf.append(obj)
+        position += len(obj)
+
+    xref = [b"xref\n0 %d\n" % (len(objects) + 1), b"0000000000 65535 f \n"]
+    for offset in offsets:
+        xref.append(f"{offset:010d} 00000 n \n".encode("ascii"))
+    startxref = position
+    pdf.append(b"".join(xref))
+    trailer = f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref {startxref}\n%%EOF\n".encode("ascii")
+    pdf.append(trailer)
+
+    return b"".join(pdf)
+
+
+def _render_reporting_pdf(payload):
+    lines = [
+        "SOS Reporting Export",
+        "",
+        f"Total incidents: {payload['total_incidents']}",
+        f"Active incidents: {payload['active_incidents']}",
+        f"Escalated incidents: {payload['escalated_incidents']}",
+        f"Resolved incidents: {payload['resolved_incidents']}",
+        "",
+        "Category counts:",
+    ]
+    if payload["category_counts"]:
+        for category, count in payload["category_counts"].items():
+            lines.append(f"  {category or '(blank)'}: {count}")
+    else:
+        lines.append("  (none)")
+
+    lines.append("")
+    lines.append("Society counts:")
+    if payload["society_counts"]:
+        for society_name, counts in payload["society_counts"].items():
+            lines.append(
+                f"  {society_name}: total={counts['total']}, active={counts['active']}, "
+                f"escalated={counts['escalated']}, resolved={counts['resolved']}"
+            )
+    else:
+        lines.append("  (none)")
+
+    lines.append("")
+    lines.append("Response time summary:")
+    response_summary = payload["response_time_summary"]
+    lines.append(f"  Guardian response avg (sec): {response_summary['guardian_response_seconds_avg']}")
+    lines.append(f"  Volunteer response avg (sec): {response_summary['volunteer_response_seconds_avg']}")
+    lines.append(f"  Security response avg (sec): {response_summary['security_response_seconds_avg']}")
+    lines.append(f"  Total resolution avg (sec): {response_summary['total_resolution_seconds_avg']}")
+    for key, value in response_summary['counts'].items():
+        lines.append(f"  {key.replace('_', ' ').title()}: {value}")
+
+    return _build_pdf_bytes(lines)
+
+
+class AdminReportingView(APIView):
+    """Platform-wide reporting endpoint for Admin users.
+
+    Query params:
+    - start_date / date_from : YYYY-MM-DD
+    - end_date / date_to : YYYY-MM-DD
+    - society : society id or name
+    - category : incident category string
+    """
+    permission_classes = [IsAuthenticated, IsAdmin]
+
+    def get(self, request):
+        qs = _get_admin_reporting_queryset(request)
+        payload = _build_admin_report_payload(qs)
+        return Response(payload, status=status.HTTP_200_OK)
+
+    def delete(self, request, pk):
+        if not isinstance(request.user.role, str):
+            return Response(status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            sos = SOS.objects.get(pk=pk)
+        except SOS.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        if request.user.role == "ADMIN":
+            sos.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        if request.user.role == "RESIDENT":
+            if sos.user_id != request.user.id:
+                return Response(status=status.HTTP_403_FORBIDDEN)
+
+            sos.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        return Response(status=status.HTTP_403_FORBIDDEN)
+
+
+class AdminReportingExportExcelView(APIView):
+    permission_classes = [IsAuthenticated, IsAdmin]
+
+    def get(self, request):
+        qs = _get_admin_reporting_queryset(request)
+        payload = _build_admin_report_payload(qs)
+        contents = _render_reporting_excel(payload)
+        response = HttpResponse(contents, content_type="application/vnd.ms-excel")
+        response["Content-Disposition"] = "attachment; filename=\"sos_reporting.xls\""
+        return response
+
+
+class AdminReportingExportPdfView(APIView):
+    permission_classes = [IsAuthenticated, IsAdmin]
+
+    def get(self, request):
+        qs = _get_admin_reporting_queryset(request)
+        payload = _build_admin_report_payload(qs)
+        contents = _render_reporting_pdf(payload)
+        response = HttpResponse(contents, content_type="application/pdf")
+        response["Content-Disposition"] = "attachment; filename=\"sos_reporting.pdf\""
+        return response

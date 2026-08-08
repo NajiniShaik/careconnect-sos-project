@@ -4,67 +4,129 @@ import appConfig from "../../app.json";
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
 
-
-function isWebEnvironment() { 
+function isWebEnvironment() {
   return Platform.OS === "web";
+}
+
+function hasLocalStorage() {
+  return isWebEnvironment() && typeof globalThis.localStorage !== "undefined";
+}
+
+function getLocalStorageItem(key) {
+  if (!hasLocalStorage()) return null;
+  try {
+    return globalThis.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function setLocalStorageItem(key, value) {
+  if (!hasLocalStorage()) return;
+  try {
+    globalThis.localStorage.setItem(key, value);
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function removeLocalStorageItem(key) {
+  if (!hasLocalStorage()) return;
+  try {
+    globalThis.localStorage.removeItem(key);
+  } catch {
+    // ignore remove errors
+  }
 }
 
 let cachedAccessToken = null;
 let tokenLoadPromise = null;
 
-function getDefaultApiBaseUrl() {
-  return appConfig?.expo?.extra?.apiBaseUrl?.trim() || "";
+function getAppJsonApiBaseUrl() {
+  const rawConfig = appConfig?.default ?? appConfig;
+  return String(rawConfig?.expo?.extra?.apiBaseUrl || "").trim();
+}
+
+function getConstantsApiBaseUrl() {
+  const configBaseUrl =
+    Constants?.expoConfig?.extra?.apiBaseUrl ||
+    Constants?.manifest2?.extra?.apiBaseUrl ||
+    Constants?.manifest?.extra?.apiBaseUrl ||
+    Constants?.default?.expoConfig?.extra?.apiBaseUrl ||
+    Constants?.default?.manifest2?.extra?.apiBaseUrl ||
+    Constants?.default?.manifest?.extra?.apiBaseUrl ||
+    "";
+  return String(configBaseUrl || "").trim();
+}
+
+function getRuntimeEnvApiBaseUrl() {
+  return (
+    String(globalThis?.process?.env?.EXPO_PUBLIC_API_BASE_URL || "").trim() ||
+    String(globalThis?.process?.env?.API_BASE_URL || "").trim()
+  );
 }
 
 function getRuntimeApiBaseUrl() {
-  const runtimeBaseUrl =
-    globalThis?.process?.env?.EXPO_PUBLIC_API_BASE_URL ||
-    globalThis?.process?.env?.API_BASE_URL ||
-    "";
+  const runtimeBaseUrl = getRuntimeEnvApiBaseUrl();
+  if (runtimeBaseUrl) {
+    return runtimeBaseUrl;
+  }
 
-  if (runtimeBaseUrl.trim()) {
-    return runtimeBaseUrl.trim();
+  const constantsBaseUrl = getConstantsApiBaseUrl();
+  if (constantsBaseUrl) {
+    return constantsBaseUrl;
+  }
+
+  const appJsonBaseUrl = getAppJsonApiBaseUrl();
+  if (appJsonBaseUrl) {
+    return appJsonBaseUrl;
   }
 
   if (isWebEnvironment()) {
     return "http://127.0.0.1:8000/api";
   }
 
-  try {
-    const configBaseUrl =
-      Constants?.expoConfig?.extra?.apiBaseUrl ||
-      Constants?.manifest2?.extra?.apiBaseUrl ||
-      Constants?.manifest?.extra?.apiBaseUrl ||
-      "";
-    const finalUrl =
-      getDefaultApiBaseUrl() ||
-      configBaseUrl.trim() ||
-      "";
-    return finalUrl;
-  } catch (error) {
-    return getDefaultApiBaseUrl();
-  }
+  return "";
+}
+
+function normalizeApiBaseUrl(value) {
+  return String(value || "").trim().replace(/\/+$/u, "");
 }
 
 export function getApiBaseUrl() {
-  return getRuntimeApiBaseUrl();
+  return normalizeApiBaseUrl(getRuntimeApiBaseUrl());
 }
 
 export const API_BASE_URL = getApiBaseUrl();
+
+if (typeof globalThis !== "undefined") {
+  globalThis.__CARECONNECT_API_BASE_URL__ = API_BASE_URL;
+  globalThis.__CARECONNECT_RUNTIME_API_BASE_URL__ = getRuntimeApiBaseUrl();
+  globalThis.__CARECONNECT_APP_JSON_API_BASE_URL__ = getAppJsonApiBaseUrl();
+  globalThis.__CARECONNECT_CONSTANTS_API_BASE_URL__ = getConstantsApiBaseUrl();
+}
 
 console.log("Platform:", Platform.OS);
 console.log("API:", API_BASE_URL);
 
 export const api = create({
-  baseURL: API_BASE_URL || undefined,
   timeout: 15000,
 });
 
 api.interceptors.request.use(async (config) => {
-  // Skip auth headers for login and register endpoints
   const url = config.url || "";
+  const resolvedBaseUrl = String(config.baseURL || getApiBaseUrl() || "").trim();
+  if (resolvedBaseUrl) {
+    config.baseURL = resolvedBaseUrl;
+  }
+
+  if (typeof __DEV__ !== 'undefined' && __DEV__) {
+    try {
+      console.log("[authService] REQUEST URL:", url, "baseURL:", config.baseURL);
+    } catch (e) {}
+  }
+
   const isAuthEndpoint = url.includes("/login/") || url.includes("/register/");
-  
   if (isAuthEndpoint) {
     return config;
   }
@@ -77,10 +139,10 @@ export async function persistAuth(tokens, user) {
   const refreshToken = tokens?.refresh || null;
 
   if (isWebEnvironment()) {
-    globalThis.localStorage.setItem("access", accessToken || "");
-    globalThis.localStorage.setItem("refresh", refreshToken || "");
-    globalThis.localStorage.setItem("user", JSON.stringify(user));
-    globalThis.localStorage.setItem("auth-session-state", "logged-in");
+    setLocalStorageItem("access", accessToken || "");
+    setLocalStorageItem("refresh", refreshToken || "");
+    setLocalStorageItem("user", JSON.stringify(user));
+    setLocalStorageItem("auth-session-state", "logged-in");
   } else {
     try {
       await SecureStore.setItemAsync("access", accessToken || "");
@@ -110,16 +172,12 @@ export async function getStoredToken() {
     let resolvedToken = null;
 
     if (isWebEnvironment()) {
-      const sessionState = typeof globalThis.localStorage !== "undefined"
-        ? globalThis.localStorage.getItem("auth-session-state")
-        : null;
+      const sessionState = getLocalStorageItem("auth-session-state");
 
       if (sessionState === "logged-out") {
         resolvedToken = null;
       } else {
-        resolvedToken = typeof globalThis.localStorage !== "undefined"
-          ? globalThis.localStorage.getItem("access")
-          : null;
+        resolvedToken = getLocalStorageItem("access");
       }
     } else {
       try {
@@ -165,7 +223,7 @@ function parseJwt(token) {
 
 async function getStoredRefresh() {
   if (isWebEnvironment()) {
-    return globalThis.localStorage.getItem('refresh');
+    return getLocalStorageItem('refresh');
   }
   try {
     return await SecureStore.getItemAsync('refresh');
@@ -181,7 +239,8 @@ async function tryRefreshToken() {
   try {
     const resp = await api.post('/token/refresh/', { refresh });
     if (resp?.data?.access) {
-      await persistAuth(resp.data, JSON.parse(globalThis.localStorage.getItem('user') || '{}'));
+      const user = await getStoredUser();
+      await persistAuth(resp.data, user || {});
       return true;
     }
   } catch (error) {
@@ -217,10 +276,10 @@ export async function clearAuth() {
   tokenLoadPromise = null;
 
   if (isWebEnvironment()) {
-    globalThis.localStorage.removeItem("access");
-    globalThis.localStorage.removeItem("refresh");
-    globalThis.localStorage.removeItem("user");
-    globalThis.localStorage.setItem("auth-session-state", "logged-out");
+    removeLocalStorageItem("access");
+    removeLocalStorageItem("refresh");
+    removeLocalStorageItem("user");
+    setLocalStorageItem("auth-session-state", "logged-out");
   } else {
     try {
       await SecureStore.deleteItemAsync("access");
@@ -236,8 +295,7 @@ export async function clearAuth() {
 
 export async function getStoredUser() {
   if (isWebEnvironment()) {
-    const user =
-      typeof globalThis.localStorage !== "undefined" ? globalThis.localStorage.getItem("user") : null;
+    const user = getLocalStorageItem("user");
     return user ? JSON.parse(user) : null;
   }
 

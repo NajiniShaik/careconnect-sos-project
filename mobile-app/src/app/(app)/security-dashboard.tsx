@@ -259,6 +259,10 @@ export default function SecurityDashboardRoute() {
               <AppIcon name="people-outline" size={20} color={appColors.blue} />
               <Text style={styles.actionTitle}>Community incidents</Text>
             </Pressable>
+            <Pressable style={styles.actionCard} onPress={() => router.push("/security-reporting?returnTo=%2Fsecurity-dashboard")}>
+              <AppIcon name="stats-chart-outline" size={20} color={appColors.blue} />
+              <Text style={styles.actionTitle}>Reporting summary</Text>
+            </Pressable>
             <Pressable style={styles.actionCard} onPress={() => router.push("/alerts")}>
               <AppIcon name="chatbubble-outline" size={20} color={appColors.blue} />
               <Text style={styles.actionTitle}>Incident updates</Text>
@@ -302,7 +306,19 @@ export default function SecurityDashboardRoute() {
                   </View>
                   <Text style={styles.incidentTime}>{formatRelativeTime(incident.time)}</Text>
                 </View>
-                <AppButton title="View" onPress={() => router.push("/volunteer-incidents")} variant="secondary" style={styles.viewButton} />
+                <View style={styles.incidentActions}>
+                  <AppButton
+                    title="Coordinate"
+                    onPress={() => router.push(`/security-coordination?incidentId=${encodeURIComponent(String(incident.id))}&returnTo=%2Fsecurity-dashboard`)}
+                    variant="secondary"
+                    style={styles.viewButton}
+                  />
+                  <AppButton
+                    title="Updates"
+                    onPress={() => router.push(`/security-updates?incidentId=${encodeURIComponent(String(incident.id))}&returnTo=%2Fsecurity-dashboard`)}
+                    style={styles.viewButton}
+                  />
+                </View>
               </View>
             ))
           ) : (
@@ -528,6 +544,10 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
     justifyContent: "space-between",
     gap: 10,
+  },
+  incidentActions: {
+    gap: 8,
+    minWidth: 104,
   },
   incidentContent: {
     flex: 1,

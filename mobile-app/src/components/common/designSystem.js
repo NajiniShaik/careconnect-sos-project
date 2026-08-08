@@ -48,6 +48,13 @@ const iconMap = {
   "location-outline": "📍",
   "clipboard-outline": "📋",
   "mic-outline": "🎤",
+  "stats-chart-outline": "📊",
+  "alert-circle-outline": "🔔",
+  "checkmark-circle-outline": "✅",
+  "list-outline": "☷",
+  "flash-outline": "⚡",
+  "chatbubble-outline": "💬",
+  "analytics-outline": "📈",
 };
 
 export function AppIcon({ name, size = 18, color = appColors.blue }) {
