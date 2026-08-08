@@ -2,11 +2,15 @@ import logging
 import re
 from typing import List
 
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
 from django.conf import settings
 from django.db import models, transaction
-from django.shortcuts import render
+from django.db.models import Q
+# render not used
 from django.contrib.auth import get_user_model
 from django.core.paginator import Paginator
+from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import status, viewsets
 from rest_framework.views import APIView
@@ -26,14 +30,18 @@ from .serializers import (
     SOSStatusDetailSerializer,
     SOSStatusListItemSerializer,
     SOSResponseMonitoringSerializer,
+    ChatMessageSerializer,
+    ResponseUpdateSerializer,
 )
-from .models import SOS, SOSMessage, SOSStatusEvent
+from .models import SOS, SOSMessage, SOSStatusEvent, ChatMessage, ResponseUpdate
 from . import transcription as transcription_module
 from .transcription import enqueue_transcription
 from .utils import reverse_geocode_coordinates
-from users.permissions import IsAdmin, IsResident, IsSecurity
+from users.permissions import IsAdmin, IsAdminOrSecurity, IsResident, IsSecurity
+from users.models import GuardianProfile
 from notifications.models import DeviceToken, Notification, NotificationDelivery
 from notifications.tasks import send_push_notification_task, send_email_notification_task, send_sms_notification_task, process_community_broadcast_task
+from notifications.community_broadcast import CommunityBroadcastService
 from society.models import Society
 
 logger = logging.getLogger(__name__)
@@ -45,17 +53,72 @@ class DashboardPagination(PageNumberPagination):
     max_page_size = 100
 
 
+class UpdatesPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = "page_size"
+    max_page_size = 200
+
+
+def _get_dashboard_sos_queryset(user):
+    queryset = SOS.objects.select_related("user")
+    if getattr(user, "role", None) == "SECURITY":
+        security_profile = getattr(user, "security_profile", None)
+        society = getattr(security_profile, "society", None)
+        if society is None:
+            return queryset.none()
+        return queryset.filter(user__resident_profile__society=society)
+    if getattr(user, "role", None) == "ADMIN":
+        return queryset.all()
+    return queryset.none()
+
+
+def _get_security_scope_society(user):
+    security_profile = getattr(user, "security_profile", None)
+    return getattr(security_profile, "society", None)
+
+
+def _is_security_incident_in_scope(sos, user):
+    society = _get_security_scope_society(user)
+    if society is None:
+        return True
+
+    resident_profile = getattr(getattr(sos, "user", None), "resident_profile", None)
+    return getattr(resident_profile, "society_id", None) == getattr(society, "id", None)
+
+
+def _summarize_security_dashboard_queryset(queryset):
+    summary = {
+        "total_incidents": queryset.count(),
+        "active_incidents": 0,
+        "escalated_incidents": 0,
+        "resolved_incidents": 0,
+    }
+
+    for sos in queryset:
+        current_status = sos.get_current_lifecycle_status()
+        status_field = str(getattr(sos, "status", "") or "").upper()
+        if current_status == "INCIDENT_CLOSED" or status_field in {"RESOLVED", "CLOSED"}:
+            summary["resolved_incidents"] += 1
+        else:
+            summary["active_incidents"] += 1
+            if status_field == "ESCALATED" or current_status == "AUTO_ESCALATED":
+                summary["escalated_incidents"] += 1
+
+    return summary
+
+
 class DashboardOverviewView(APIView):
-    permission_classes = [IsAuthenticated, IsAdmin]
+    permission_classes = [IsAuthenticated, IsAdminOrSecurity]
 
     def get(self, request):
-        sos_queryset = SOS.objects.select_related("user").all()
+        sos_queryset = _get_dashboard_sos_queryset(request.user)
 
         active_incidents = 0
         resolved_incidents = 0
         for sos in sos_queryset:
             current_status = sos.get_current_lifecycle_status()
-            if current_status == "INCIDENT_CLOSED" or str(getattr(sos, "status", "")).upper() == "RESOLVED":
+            status_field = str(getattr(sos, "status", "") or "").upper()
+            if current_status == "INCIDENT_CLOSED" or status_field in {"RESOLVED", "CLOSED"}:
                 resolved_incidents += 1
             else:
                 active_incidents += 1
@@ -79,12 +142,13 @@ class DashboardOverviewView(APIView):
 
 
 class DashboardRecentActivityView(APIView):
-    permission_classes = [IsAuthenticated, IsAdmin]
+    permission_classes = [IsAuthenticated, IsAdminOrSecurity]
     pagination_class = DashboardPagination
 
     def get(self, request):
+        sos_queryset = _get_dashboard_sos_queryset(request.user)
         activities = []
-        for sos in SOS.objects.select_related("user").order_by("-created_at", "-id"):
+        for sos in sos_queryset.order_by("-created_at", "-id"):
             current_status = sos.get_current_lifecycle_status()
             status_label = "Resolved" if current_status == "INCIDENT_CLOSED" else "Active"
             activities.append(
@@ -102,6 +166,135 @@ class DashboardRecentActivityView(APIView):
         paginator = self.pagination_class()
         page = paginator.paginate_queryset(activities, request, view=self)
         return paginator.get_paginated_response(page)
+
+
+class SecurityDashboardView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminOrSecurity]
+
+    def get(self, request):
+        sos_queryset = _get_dashboard_sos_queryset(request.user)
+
+        summary = _summarize_security_dashboard_queryset(sos_queryset)
+        summary["active_societies"] = (
+            sos_queryset.filter(user__resident_profile__society__isnull=False)
+            .values_list("user__resident_profile__society__id", flat=True)
+            .distinct()
+            .count()
+        )
+
+        recent_activity = []
+        active_incidents = []
+
+        for sos in sos_queryset.order_by("-created_at", "-id"):
+            current_status = sos.get_current_lifecycle_status()
+            status_field = str(getattr(sos, "status", "") or "").upper()
+            recent_activity.append(
+                {
+                    "id": sos.id,
+                    "type": "SOS",
+                    "title": "SOS Incident",
+                    "description": sos.message or "SOS alert triggered",
+                    "actor": getattr(sos.user, "username", None),
+                    "status": "Resolved" if current_status == "INCIDENT_CLOSED" else "Active",
+                    "created_at": sos.created_at.isoformat() if getattr(sos, "created_at", None) else None,
+                }
+            )
+
+            if current_status != "INCIDENT_CLOSED" and status_field not in {"RESOLVED", "CLOSED"}:
+                society = None
+                resident_profile = getattr(sos.user, "resident_profile", None)
+                if resident_profile is not None:
+                    society = getattr(resident_profile, "society", None)
+                active_incidents.append(
+                    {
+                        "id": sos.id,
+                        "title": sos.message or "SOS alert",
+                        "priority": sos.priority or "Medium",
+                        "status": status_field or "ACTIVE",
+                        "society": getattr(society, "name", None),
+                        "created_at": sos.created_at.isoformat() if getattr(sos, "created_at", None) else None,
+                    }
+                )
+
+        recent_activity = recent_activity[:10]
+        active_incidents = active_incidents[:5]
+
+        return Response(
+            {
+                "summary": summary,
+                "recent_activity": recent_activity,
+                "active_incidents": active_incidents,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class SecurityIncidentCoordinationView(APIView):
+    permission_classes = [IsAuthenticated, IsSecurity]
+
+    def get(self, request, pk):
+        try:
+            sos = _get_dashboard_sos_queryset(request.user).get(pk=pk)
+        except SOS.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        resident_profile = getattr(getattr(sos.user, "resident_profile", None), "society", None)
+        society = {
+            "id": getattr(resident_profile, "id", None),
+            "name": getattr(resident_profile, "name", None),
+        }
+
+        latest_update = ResponseUpdate.objects.filter(incident=sos).order_by("-created_at", "-id").first()
+        latest_update_data = None
+        if latest_update is not None:
+            latest_update_data = {
+                "id": latest_update.id,
+                "message": latest_update.message,
+                "role": latest_update.role,
+                "update_type": latest_update.update_type,
+                "created_at": latest_update.created_at.isoformat() if getattr(latest_update, "created_at", None) else None,
+            }
+
+        payload = {
+            "id": sos.id,
+            "message": sos.message,
+            "location": sos.location,
+            "category": sos.category,
+            "priority": sos.priority,
+            "status": sos.status,
+            "current_status": sos.get_current_lifecycle_status(),
+            "created_at": sos.created_at.isoformat() if getattr(sos, "created_at", None) else None,
+            "updated_at": sos.updated_at.isoformat() if getattr(sos, "updated_at", None) else None,
+            "society": society,
+            "incident_owner": getattr(sos.user, "username", None),
+            "assigned_volunteer": getattr(sos.assigned_volunteer, "username", None),
+            "coordination": {
+                "status": sos.status,
+                "incident_owner": getattr(sos.user, "username", None),
+                "assigned_volunteer": getattr(sos.assigned_volunteer, "username", None),
+                "priority": sos.priority,
+                "latest_update": latest_update_data,
+                "updated_at": sos.updated_at.isoformat() if getattr(sos, "updated_at", None) else None,
+            },
+        }
+        return Response(payload, status=status.HTTP_200_OK)
+
+
+class SecurityReportingSummaryView(APIView):
+    permission_classes = [IsAuthenticated, IsSecurity]
+
+    def get(self, request):
+        queryset = _get_dashboard_sos_queryset(request.user)
+        summary = _summarize_security_dashboard_queryset(queryset)
+        society = _get_security_scope_society(request.user)
+        payload = {
+            "summary": summary,
+            "society": {
+                "id": getattr(society, "id", None),
+                "name": getattr(society, "name", None),
+            },
+        }
+        return Response(payload, status=status.HTTP_200_OK)
 
 
 def _normalize_phone_number(phone_number):
@@ -173,31 +366,93 @@ def _get_user_device_tokens(user):
     return tokens
 
 
+def _is_user_available_for_sos_role(user):
+    role = str(getattr(user, "role", "") or "").upper()
+    if role == "VOLUNTEER":
+        volunteer_profile = getattr(user, "volunteer_profile", None)
+        return volunteer_profile is None or bool(getattr(volunteer_profile, "is_available", False))
+    if role == "SECURITY":
+        security_profile = getattr(user, "security_profile", None)
+        return security_profile is None or bool(getattr(security_profile, "is_available", False))
+    return True
+
+
+def _get_linked_guardians_for_resident(resident_user):
+    if resident_user is None:
+        return []
+
+    User = get_user_model()
+    resident_username = str(getattr(resident_user, "username", "") or "").strip().lower()
+    resident_full_name = str(getattr(resident_user, "get_full_name", lambda: "")() or "").strip().lower()
+    resident_email = str(getattr(resident_user, "email", "") or "").strip().lower()
+
+    try:
+        guardian_profiles = GuardianProfile.objects.select_related("user").all()
+    except Exception:
+        return []
+
+    linked_guardians = []
+    for profile in guardian_profiles:
+        guardian_user = getattr(profile, "user", None)
+        if guardian_user is None or guardian_user.id == getattr(resident_user, "id", None):
+            continue
+
+        resident_name_value = str(getattr(profile, "resident_name", "") or "").strip().lower()
+        if not resident_name_value:
+            continue
+
+        if resident_name_value in {resident_username, resident_full_name, resident_email}:
+            linked_guardians.append(guardian_user)
+
+    return linked_guardians
+
+
 def _get_sos_recipients(resident_user, society_name):
     recipients = [resident_user]
     User = get_user_model()
 
     try:
-        guardians = list(User.objects.filter(role="GUARDIAN"))
-        recipients.extend([guardian for guardian in guardians if guardian and guardian.id != getattr(resident_user, "id", None)])
+        linked_guardians = _get_linked_guardians_for_resident(resident_user)
+        recipients.extend([guardian for guardian in linked_guardians if guardian and guardian.id != getattr(resident_user, "id", None)])
     except Exception:
-        guardians = []
+        linked_guardians = []
 
     try:
         security_users = list(User.objects.filter(role="SECURITY"))
-        recipients.extend([security_user for security_user in security_users if security_user and security_user.id != getattr(resident_user, "id", None)])
+        recipients.extend([
+            security_user
+            for security_user in security_users
+            if security_user
+            and security_user.id != getattr(resident_user, "id", None)
+            and _is_user_available_for_sos_role(security_user)
+        ])
     except Exception:
         security_users = []
 
     try:
         volunteer_users = list(User.objects.filter(role="VOLUNTEER"))
-        recipients.extend([volunteer_user for volunteer_user in volunteer_users if volunteer_user and volunteer_user.id != getattr(resident_user, "id", None)])
+        recipients.extend([
+            volunteer_user
+            for volunteer_user in volunteer_users
+            if volunteer_user
+            and volunteer_user.id != getattr(resident_user, "id", None)
+            and _is_user_available_for_sos_role(volunteer_user)
+        ])
     except Exception:
         volunteer_users = []
 
     try:
         admin_qs = _get_society_admin_queryset(User, society_name)
-        recipients.extend([admin_user for admin_user in admin_qs if admin_user and admin_user.id != getattr(resident_user, "id", None)])
+        recipients.extend([
+            admin_user
+            for admin_user in admin_qs
+            if admin_user
+            and admin_user.id != getattr(resident_user, "id", None)
+            and (
+                str(getattr(admin_user, "role", "") or "").upper() != "SECURITY"
+                or _is_user_available_for_sos_role(admin_user)
+            )
+        ])
     except Exception:
         admin_qs = []
 
@@ -506,10 +761,19 @@ class SOSMessageView(APIView):
         except SOS.DoesNotExist:
             return Response(status=status.HTTP_404_NOT_FOUND)
 
-        if request.user.role == "RESIDENT" and sos.user_id != request.user.id:
-            return Response(status=status.HTTP_403_FORBIDDEN)
+        user = request.user
+        logger.warning(
+            "SOSMessageView.get debug: user_id=%s username=%s role=%s sos_id=%s",
+            getattr(user, "id", None),
+            getattr(user, "username", None),
+            getattr(user, "role", None),
+            getattr(sos, "id", None),
+        )
 
-        if request.user.role not in ["RESIDENT", "SECURITY", "ADMIN"]:
+        can_view = _can_view_sos_messages(sos, user)
+        logger.warning("SOSMessageView.get debug: can_view_messages=%s", can_view)
+
+        if not can_view:
             return Response(status=status.HTTP_403_FORBIDDEN)
 
         messages = SOSMessage.objects.filter(sos=sos).order_by("created_at", "id")
@@ -732,6 +996,281 @@ class ResponseMonitoringDetailView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
+def _is_sos_visible_to_volunteer(sos, user):
+    if sos is None or user is None:
+        return False
+
+    if str(getattr(user, "role", "") or "").upper() != "VOLUNTEER":
+        return False
+
+    resident_owner = getattr(sos, "user", None)
+    resident_owner_id = getattr(resident_owner, "id", None)
+    user_id = getattr(user, "id", None)
+    if user_id is not None and resident_owner_id is not None and user_id == resident_owner_id:
+        return False
+
+    try:
+        alert_id = str(getattr(sos, "id", ""))
+        notification_match = Notification.objects.filter(user=user, kind="SOS").filter(
+            Q(data__alert_id=alert_id) | Q(data__alertId=alert_id) | Q(data__alertid=alert_id)
+        ).exists()
+        pass
+        if notification_match:
+            return True
+    except Exception:
+        pass
+
+    service = CommunityBroadcastService()
+    # If the SOS has been assigned to a volunteer, only that volunteer should see it
+    try:
+        assigned_volunteer = getattr(sos, "assigned_volunteer", None)
+        assigned_volunteer_id = getattr(assigned_volunteer, "id", None)
+        if assigned_volunteer is not None:
+            return assigned_volunteer_id == user_id
+    except Exception:
+        pass
+
+    recipients = service.get_recipients(sos, include_residents=False)
+    recipient_match = any(getattr(recipient, "id", None) == getattr(user, "id", None) for recipient in recipients)
+    return recipient_match
+
+
+def _is_sos_visible_to_guardian(sos, user):
+    if sos is None or user is None:
+        return False
+
+    if str(getattr(user, "role", "") or "").upper() != "GUARDIAN":
+        return False
+
+    resident_user = getattr(sos, "user", None)
+    if resident_user is None:
+        return False
+
+    linked_guardians = _get_linked_guardians_for_resident(resident_user)
+    linked_guardian_ids = [getattr(guardian, "id", None) for guardian in linked_guardians]
+    guardian_match = any(getattr(guardian, "id", None) == getattr(user, "id", None) for guardian in linked_guardians)
+    pass
+    return guardian_match
+
+
+def _can_view_sos_messages(sos, user):
+    if sos is None or user is None:
+        return False
+
+    role = str(getattr(user, "role", "") or "").upper()
+
+    if role == "RESIDENT":
+        return getattr(sos, "user_id", None) == getattr(user, "id", None)
+
+    if role == "VOLUNTEER":
+        return _is_sos_visible_to_volunteer(sos, user)
+
+    if role == "GUARDIAN":
+        return _is_sos_visible_to_guardian(sos, user)
+
+    return role in ["ADMIN", "SECURITY"]
+
+
+def _broadcast_chat_message(incident_id, payload):
+    try:
+        channel_layer = get_channel_layer()
+        if channel_layer is None:
+            return False
+
+        group_send = getattr(channel_layer, "group_send", None)
+        if not callable(group_send):
+            return False
+
+        async_to_sync(group_send)(f"chat_{incident_id}", {"type": "chat.message", "message": payload})
+        return True
+    except Exception:
+        logger.exception("Failed to broadcast chat message for incident %s", incident_id)
+        return False
+
+
+class ChatHistoryView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        try:
+            sos = SOS.objects.get(pk=pk)
+        except SOS.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        if not _can_view_sos_messages(sos, request.user):
+            return Response(status=status.HTTP_403_FORBIDDEN)
+
+        messages = ChatMessage.objects.filter(incident=sos).order_by("created_at", "id")
+        serializer = ChatMessageSerializer(messages, many=True, context={"request": request})
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def post(self, request, pk):
+        try:
+            sos = SOS.objects.get(pk=pk)
+        except SOS.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        if not _can_view_sos_messages(sos, request.user):
+            return Response(status=status.HTTP_403_FORBIDDEN)
+
+        raw_message = request.data.get("message", "")
+        if raw_message is None:
+            raw_message = ""
+        message_text = str(raw_message).strip()
+        if not message_text:
+            return Response({"message": "Message cannot be empty."}, status=status.HTTP_400_BAD_REQUEST)
+
+        chat_message = ChatMessage.objects.create(
+            incident=sos,
+            sender=request.user,
+            message=message_text,
+        )
+        serializer = ChatMessageSerializer(chat_message, context={"request": request})
+        payload = serializer.data
+        _broadcast_chat_message(sos.id, payload)
+        return Response(payload, status=status.HTTP_201_CREATED)
+
+
+class SOSResponseUpdateView(APIView):
+    permission_classes = [IsAuthenticated]
+    pagination_class = UpdatesPagination
+
+    def _get_status_transition_error(self, sos, new_status):
+        normalized_status = str(new_status).upper()
+        if normalized_status not in {"ACKNOWLEDGED", "IN_PROGRESS", "ACTIVE", "ESCALATED", "RESOLVED", "CLOSED"}:
+            return {"status": ["Unsupported status update. Use ACKNOWLEDGED, IN_PROGRESS, ACTIVE, ESCALATED, RESOLVED, or CLOSED."]}
+
+        mapped_status = {
+            "ACKNOWLEDGED": "ACTIVE",
+            "IN_PROGRESS": "IN_PROGRESS",
+            "ACTIVE": "ACTIVE",
+            "ESCALATED": "ESCALATED",
+            "RESOLVED": "RESOLVED",
+            "CLOSED": "CLOSED",
+        }[normalized_status]
+
+        if not sos.can_transition_to(mapped_status):
+            return {"status": [f"Invalid status transition from {sos.status} to {mapped_status}"]}
+
+        return None
+
+    def _apply_status_update(self, sos, status_value, request_user):
+        error = self._get_status_transition_error(sos, status_value)
+        if error is not None:
+            return None, error
+
+        normalized_status = str(status_value).upper()
+        mapped_status = {
+            "ACKNOWLEDGED": "ACTIVE",
+            "IN_PROGRESS": "IN_PROGRESS",
+            "ACTIVE": "ACTIVE",
+            "ESCALATED": "ESCALATED",
+            "RESOLVED": "RESOLVED",
+            "CLOSED": "CLOSED",
+        }[normalized_status]
+
+        if mapped_status == "CLOSED":
+            if not sos.closed_at:
+                sos.closed_at = timezone.now()
+            sos.status = mapped_status
+            sos.save(update_fields=["status", "closed_at", "updated_at"])
+            sos.record_status_event("INCIDENT_CLOSED", details="Incident closed by security staff")
+            return sos, None
+
+        if mapped_status in {"ACTIVE", "IN_PROGRESS", "ESCALATED", "RESOLVED"}:
+            sos.status = mapped_status
+            sos.save(update_fields=["status", "updated_at"])
+            if mapped_status in {"ACTIVE", "IN_PROGRESS", "ESCALATED", "RESOLVED"}:
+                sos.record_status_event("SECURITY_RESPONDED", details=f"Incident updated to {mapped_status}")
+            return sos, None
+
+        return None, {"status": ["Unsupported status update."]}
+
+    def get(self, request, pk):
+        try:
+            sos = SOS.objects.get(pk=pk)
+        except SOS.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        # Permission checks: residents only read their own; volunteers/security/admin per visibility
+        user = request.user
+        role = str(getattr(user, "role", "") or "").upper()
+
+        if role == "ADMIN":
+            qs = ResponseUpdate.objects.filter(incident=sos).order_by("created_at", "id")
+        elif role == "RESIDENT":
+            if sos.user_id != user.id:
+                return Response(status=status.HTTP_403_FORBIDDEN)
+            qs = ResponseUpdate.objects.filter(incident=sos).order_by("created_at", "id")
+        elif role in ["VOLUNTEER", "SECURITY"]:
+            # allow if visible to the user or assigned
+            if role == "SECURITY" and not _is_security_incident_in_scope(sos, user):
+                return Response(status=status.HTTP_404_NOT_FOUND)
+            try:
+                can_view = _can_view_sos_messages(sos, user)
+            except Exception:
+                can_view = False
+            assigned_ok = getattr(sos, "assigned_volunteer_id", None) == getattr(user, "id", None)
+            if not (can_view or assigned_ok):
+                return Response(status=status.HTTP_403_FORBIDDEN)
+            qs = ResponseUpdate.objects.filter(incident=sos).order_by("created_at", "id")
+        elif role == "GUARDIAN":
+            # Guardians may view updates only for incidents they are linked/authorized to see
+            try:
+                can_view = _is_sos_visible_to_guardian(sos, user)
+            except Exception:
+                can_view = False
+            if not can_view:
+                return Response(status=status.HTTP_403_FORBIDDEN)
+            qs = ResponseUpdate.objects.filter(incident=sos).order_by("created_at", "id")
+        else:
+            return Response(status=status.HTTP_403_FORBIDDEN)
+
+        # paginate
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(qs, request)
+        serializer = ResponseUpdateSerializer(page, many=True, context={"request": request})
+        return paginator.get_paginated_response(serializer.data)
+
+    def post(self, request, pk):
+        try:
+            sos = SOS.objects.get(pk=pk)
+        except SOS.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        user = request.user
+        role = str(getattr(user, "role", "") or "").upper()
+
+        if role not in ["ADMIN", "SECURITY", "VOLUNTEER"]:
+            return Response(status=status.HTTP_403_FORBIDDEN)
+
+        # Ensure the poster can modify/create an update for this incident
+        if role == "SECURITY" and not _is_security_incident_in_scope(sos, user):
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        try:
+            can_view = _can_view_sos_messages(sos, user)
+        except Exception:
+            can_view = False
+        assigned_ok = getattr(sos, "assigned_volunteer_id", None) == getattr(user, "id", None)
+        if role in ["VOLUNTEER", "SECURITY"] and not (can_view or assigned_ok):
+            return Response(status=status.HTTP_403_FORBIDDEN)
+
+        serializer = ResponseUpdateSerializer(data=request.data, context={"request": request})
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        status_value = request.data.get("status")
+        if status_value is not None:
+            updated_sos, status_error = self._apply_status_update(sos, status_value, user)
+            if status_error is not None:
+                return Response(status_error, status=status.HTTP_400_BAD_REQUEST)
+            sos = updated_sos
+
+        update = serializer.save(incident=sos, user=user, role=role)
+        out = ResponseUpdateSerializer(update, context={"request": request})
+        return Response(out.data, status=status.HTTP_201_CREATED)
+
+
 class SOSStatusTrackingView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -744,7 +1283,13 @@ class SOSStatusTrackingView(APIView):
         if request.user.role == "RESIDENT" and sos.user_id != request.user.id:
             return Response(status=status.HTTP_403_FORBIDDEN)
 
-        if request.user.role not in ["ADMIN", "SECURITY", "RESIDENT"]:
+        if request.user.role == "VOLUNTEER" and not _is_sos_visible_to_volunteer(sos, request.user):
+            return Response(status=status.HTTP_403_FORBIDDEN)
+
+        if request.user.role == "GUARDIAN" and not _is_sos_visible_to_guardian(sos, request.user):
+            return Response(status=status.HTTP_403_FORBIDDEN)
+
+        if request.user.role not in ["ADMIN", "SECURITY", "RESIDENT", "VOLUNTEER", "GUARDIAN"]:
             return Response(status=status.HTTP_403_FORBIDDEN)
 
         serializer = SOSStatusDetailSerializer(sos, context={"request": request})
@@ -811,7 +1356,10 @@ class SOSAlertManagementView(APIView):
             if request.user.role == "RESIDENT" and sos.user_id != request.user.id:
                 return Response(status=status.HTTP_403_FORBIDDEN)
 
-            if request.user.role not in ["ADMIN", "SECURITY", "VOLUNTEER", "RESIDENT"]:
+            if request.user.role == "GUARDIAN" and not _is_sos_visible_to_guardian(sos, request.user):
+                return Response(status=status.HTTP_403_FORBIDDEN)
+
+            if request.user.role not in ["ADMIN", "SECURITY", "VOLUNTEER", "RESIDENT", "GUARDIAN"]:
                 return Response(status=status.HTTP_403_FORBIDDEN)
 
             serializer = SOSSerializer(sos, context={"request": request})
@@ -821,6 +1369,20 @@ class SOSAlertManagementView(APIView):
             sos_list = SOS.objects.filter(user=request.user).order_by("-created_at")
         elif request.user.role in ["SECURITY", "ADMIN"]:
             sos_list = SOS.objects.all().order_by("-created_at")
+        elif request.user.role == "VOLUNTEER":
+            visible_sos_ids = [
+                sos.id
+                for sos in SOS.objects.all().order_by("-created_at")
+                if _is_sos_visible_to_volunteer(sos, request.user)
+            ]
+            sos_list = SOS.objects.filter(pk__in=visible_sos_ids).order_by("-created_at")
+        elif request.user.role == "GUARDIAN":
+            visible_sos_ids = [
+                sos.id
+                for sos in SOS.objects.all().order_by("-created_at")
+                if _is_sos_visible_to_guardian(sos, request.user)
+            ]
+            sos_list = SOS.objects.filter(pk__in=visible_sos_ids).order_by("-created_at")
         else:
             sos_list = SOS.objects.filter(user=request.user).order_by("-created_at")
 
@@ -839,24 +1401,100 @@ class SOSAlertManagementView(APIView):
         if request.user.role == "ADMIN":
             serializer = SOSStatusUpdateSerializer(sos, data=request.data, partial=True)
             if serializer.is_valid():
-                serializer.save()
+                previous_status = str(getattr(sos, "status", "") or "").upper()
+                updated_sos = serializer.save()
                 if "status" in request.data:
                     normalized_status = str(request.data.get("status", "")).upper()
-                    if normalized_status in {"RESOLVED", "CLOSED"}:
-                        sos.record_status_event("INCIDENT_CLOSED", details="Incident closed")
-                    elif normalized_status in {"IN_PROGRESS", "ACTIVE", "ESCALATED"}:
-                        sos.record_status_event("SECURITY_RESPONDED", details="Security responded")
-                return Response(SOSSerializer(sos, context={"request": request}).data, status=status.HTTP_200_OK)
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+                    if normalized_status == "CLOSED":
+                        if not updated_sos.closed_at:
+                            updated_sos.closed_at = timezone.now()
+                            updated_sos.save(update_fields=["closed_at"])
 
+                        closure_notes = request.data.get("closure_notes") or updated_sos.closure_notes or ""
+                        resolution_summary = request.data.get("resolution_summary") or updated_sos.resolution_summary or ""
+                        actions_taken = request.data.get("actions_taken") or updated_sos.actions_taken or ""
+                        additional_remarks = request.data.get("additional_remarks") or updated_sos.additional_remarks or ""
+
+                        message_parts = []
+                        if closure_notes:
+                            message_parts.append(f"Closure notes: {closure_notes}")
+                        if resolution_summary:
+                            message_parts.append(f"Resolution summary: {resolution_summary}")
+                        if actions_taken:
+                            message_parts.append(f"Actions taken: {actions_taken}")
+                        if additional_remarks:
+                            message_parts.append(f"Additional remarks: {additional_remarks}")
+
+                        closure_message = "\n\n".join(message_parts) if message_parts else "Incident closed."
+                        if previous_status != "CLOSED":
+                            SOSMessage.objects.create(
+                                sos=updated_sos,
+                                sender=request.user,
+                                message=closure_message,
+                                transcription_status="NOT_REQUIRED",
+                            )
+
+                        updated_sos.record_status_event(
+                            "INCIDENT_CLOSED",
+                            details=(
+                                request.data.get("resolution_summary")
+                                or request.data.get("closure_notes")
+                                or request.data.get("actions_taken")
+                                or "Incident closed"
+                            ),
+                        )
+                    elif normalized_status in {"IN_PROGRESS", "ACTIVE", "ESCALATED"}:
+                        updated_sos.record_status_event("SECURITY_RESPONDED", details="Security responded")
+                    elif normalized_status == "RESOLVED":
+                        updated_sos.record_status_event("SECURITY_RESPONDED", details="Incident marked resolved")
+                return Response(SOSSerializer(updated_sos, context={"request": request}).data, status=status.HTTP_200_OK)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         if request.user.role in ["VOLUNTEER", "SECURITY"]:
             action = str(request.data.get("action", "")).strip().lower()
             if action == "accept":
-                if request.user.role == "VOLUNTEER":
-                    sos.record_status_event("VOLUNTEER_ACCEPTED", details="Volunteer accepted the incident")
-                else:
-                    sos.record_status_event("SECURITY_RESPONDED", details="Security responded to the incident")
-                return Response(SOSSerializer(sos, context={"request": request}).data, status=status.HTTP_200_OK)
+                try:
+                    with transaction.atomic():
+                        locked_sos = SOS.objects.select_for_update().get(pk=sos.pk)
+                        # Prevent accepting incidents that are already assigned or closed
+                        if str(getattr(locked_sos, "status", "") or "").upper() == "CLOSED" or locked_sos.status_events.filter(status="INCIDENT_CLOSED").exists():
+                            return Response({"detail": "Cannot accept a closed incident."}, status=status.HTTP_409_CONFLICT)
+
+                        existing_assignment = locked_sos.assigned_volunteer is not None or locked_sos.status_events.filter(
+                            status__in=["VOLUNTEER_ACCEPTED", "SECURITY_RESPONDED"]
+                        ).exists()
+                        if existing_assignment:
+                            return Response({"detail": "Incident already assigned."}, status=status.HTTP_409_CONFLICT)
+
+                        if request.user.role == "VOLUNTEER":
+                            # assign the volunteer, transition lifecycle to ACTIVE, and record event
+                            locked_sos.assigned_volunteer = request.user
+                            locked_sos.status = "ACTIVE"
+                            locked_sos.save(update_fields=["assigned_volunteer", "status", "updated_at"])
+                            locked_sos.record_status_event("VOLUNTEER_ACCEPTED", details="Volunteer accepted the incident")
+
+                            Notification.objects.create(
+                                user=request.user,
+                                title="Incident assigned",
+                                body=f"You have been assigned to SOS incident {locked_sos.id}.",
+                                kind="SOS",
+                                data={
+                                    "type": "SOS_ASSIGNMENT",
+                                    "alert_id": str(locked_sos.id),
+                                    "assigned_to": str(request.user.id),
+                                    "target": f"/alerts?alert_id={locked_sos.id}",
+                                },
+                            )
+                        else:
+                            locked_sos.assigned_volunteer = request.user
+                            locked_sos.status = "ACTIVE"
+                            locked_sos.save(update_fields=["assigned_volunteer", "status", "updated_at"])
+                            locked_sos.record_status_event("SECURITY_RESPONDED", details="Security responded to the incident")
+                        return Response(SOSSerializer(locked_sos, context={"request": request}).data, status=status.HTTP_200_OK)
+                except SOS.DoesNotExist:
+                    return Response(status=status.HTTP_404_NOT_FOUND)
+            return Response(status=status.HTTP_403_FORBIDDEN)
+
+        if request.user.role == "GUARDIAN":
             return Response(status=status.HTTP_403_FORBIDDEN)
 
         if request.user.role == "RESIDENT":

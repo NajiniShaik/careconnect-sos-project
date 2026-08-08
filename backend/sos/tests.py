@@ -11,8 +11,8 @@ from rest_framework import status
 
 from notifications.models import Notification, NotificationDelivery, EscalationLog
 from society.models import Society
-from users.models import ResidentProfile
-from .models import SOS, SOSMessage, SOSStatusEvent
+from users.models import GuardianProfile, ResidentProfile, SecurityProfile, VolunteerProfile
+from .models import SOS, SOSMessage, SOSStatusEvent, ResponseUpdate
 from .serializers import SOSSerializer
 
 
@@ -108,6 +108,255 @@ class SOSStatusTrackingTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(SOSStatusEvent.objects.filter(sos=sos, status="VOLUNTEER_ACCEPTED").exists())
 
+    def test_volunteer_accept_action_creates_assignment_notification(self):
+        volunteer_user = self.user_model.objects.create_user(
+            username="volunteer_assignment",
+            email="volunteer_assignment@example.com",
+            password="testpass123",
+            role="VOLUNTEER",
+        )
+        sos = SOS.objects.create(user=self.resident_user, message="Need help", location="Block 7", category="medical")
+
+        self.client.force_authenticate(user=volunteer_user)
+        response = self.client.patch(f"/api/sos/{sos.id}/", {"action": "accept"}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(Notification.objects.filter(user=volunteer_user, kind="SOS", data__type="SOS_ASSIGNMENT", data__alert_id=str(sos.id)).exists())
+
+    def test_volunteer_accept_transitions_to_active(self):
+        volunteer_user = self.user_model.objects.create_user(
+            username="volunteer_active",
+            email="volunteer_active@example.com",
+            password="testpass123",
+            role="VOLUNTEER",
+        )
+        sos = SOS.objects.create(user=self.resident_user, message="Need help", location="Block 9", category="medical", status="OPEN")
+
+        self.client.force_authenticate(user=volunteer_user)
+        response = self.client.patch(f"/api/sos/{sos.id}/", {"action": "accept"}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        updated = SOS.objects.get(pk=sos.id)
+        self.assertEqual(updated.status, "ACTIVE")
+        self.assertTrue(SOSStatusEvent.objects.filter(sos=updated, status="VOLUNTEER_ACCEPTED").exists())
+
+    def test_admin_can_resolve_then_close_and_prevent_reopen(self):
+        sos = SOS.objects.create(user=self.resident_user, message="Need help", location="Block 10", category="medical", status="OPEN")
+
+        self.client.force_authenticate(user=self.admin_user)
+        # Admin marks resolved
+        resp_res = self.client.patch(f"/api/sos/{sos.id}/", {"status": "RESOLVED"}, format="json")
+        self.assertEqual(resp_res.status_code, status.HTTP_200_OK)
+        sos.refresh_from_db()
+        self.assertEqual(sos.status, "RESOLVED")
+
+        # Now admin closes
+        resp_close = self.client.patch(f"/api/sos/{sos.id}/", {"status": "CLOSED"}, format="json")
+        self.assertEqual(resp_close.status_code, status.HTTP_200_OK)
+        sos.refresh_from_db()
+        self.assertEqual(sos.status, "CLOSED")
+        # There should be an INCIDENT_CLOSED event
+        self.assertTrue(SOSStatusEvent.objects.filter(sos=sos, status="INCIDENT_CLOSED").exists())
+
+        # Attempt to reopen from CLOSED -> OPEN should be rejected
+        resp_reopen = self.client.patch(f"/api/sos/{sos.id}/", {"status": "OPEN"}, format="json")
+        self.assertEqual(resp_reopen.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_volunteer_cannot_accept_already_assigned_incident(self):
+        first_volunteer = self.user_model.objects.create_user(
+            username="volunteer_first",
+            email="volunteer_first@example.com",
+            password="testpass123",
+            role="VOLUNTEER",
+        )
+        second_volunteer = self.user_model.objects.create_user(
+            username="volunteer_second",
+            email="volunteer_second@example.com",
+            password="testpass123",
+            role="VOLUNTEER",
+        )
+        sos = SOS.objects.create(user=self.resident_user, message="Need help", location="Block 7", category="medical")
+
+        self.client.force_authenticate(user=first_volunteer)
+        first_response = self.client.patch(f"/api/sos/{sos.id}/", {"action": "accept"}, format="json")
+        self.assertEqual(first_response.status_code, status.HTTP_200_OK)
+
+        self.client.force_authenticate(user=second_volunteer)
+        second_response = self.client.patch(f"/api/sos/{sos.id}/", {"action": "accept"}, format="json")
+
+        self.assertEqual(second_response.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(second_response.data["detail"], "Incident already assigned.")
+        self.assertEqual(SOSStatusEvent.objects.filter(sos=sos, status="VOLUNTEER_ACCEPTED").count(), 1)
+
+    def test_security_cannot_accept_already_assigned_incident(self):
+        first_security = self.user_model.objects.create_user(
+            username="security_first",
+            email="security_first@example.com",
+            password="testpass123",
+            role="SECURITY",
+        )
+        second_security = self.user_model.objects.create_user(
+            username="security_second",
+            email="security_second@example.com",
+            password="testpass123",
+            role="SECURITY",
+        )
+        sos = SOS.objects.create(user=self.resident_user, message="Need help", location="Block 8", category="medical")
+
+        self.client.force_authenticate(user=first_security)
+        first_response = self.client.patch(f"/api/sos/{sos.id}/", {"action": "accept"}, format="json")
+        self.assertEqual(first_response.status_code, status.HTTP_200_OK)
+
+        self.client.force_authenticate(user=second_security)
+        second_response = self.client.patch(f"/api/sos/{sos.id}/", {"action": "accept"}, format="json")
+
+        self.assertEqual(second_response.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(second_response.data["detail"], "Incident already assigned.")
+        self.assertEqual(SOSStatusEvent.objects.filter(sos=sos, status="SECURITY_RESPONDED").count(), 1)
+
+    def test_volunteer_sees_visible_incidents_for_their_society(self):
+        volunteer_user = self.user_model.objects.create_user(
+            username="volunteer_visible",
+            email="volunteer_visible@example.com",
+            password="testpass123",
+            role="VOLUNTEER",
+        )
+        visible_society = Society.objects.create(name="Volunteer Society")
+        hidden_society = Society.objects.create(name="Other Society")
+        VolunteerProfile.objects.create(user=volunteer_user, society=visible_society, skills="first aid", availability="available", is_available=True)
+
+        resident_user = self.user_model.objects.create_user(
+            username="resident_visible",
+            email="resident_visible@example.com",
+            password="testpass123",
+            role="RESIDENT",
+        )
+        ResidentProfile.objects.create(user=resident_user, society=visible_society, block=None, flat=None)
+
+        hidden_resident_user = self.user_model.objects.create_user(
+            username="resident_hidden",
+            email="resident_hidden@example.com",
+            password="testpass123",
+            role="RESIDENT",
+        )
+        ResidentProfile.objects.create(user=hidden_resident_user, society=hidden_society, block=None, flat=None)
+
+        visible_sos = SOS.objects.create(user=resident_user, message="Visible incident", location="Block 10", category="medical")
+        hidden_sos = SOS.objects.create(user=hidden_resident_user, message="Hidden incident", location="Block 11", category="fire")
+
+        self.client.force_authenticate(user=volunteer_user)
+        response = self.client.get("/api/sos/alerts/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["id"], visible_sos.id)
+        self.assertNotEqual(response.data[0]["id"], hidden_sos.id)
+
+    def test_volunteer_with_sos_notification_can_view_alerts_and_status_for_that_sos(self):
+        volunteer_user = self.user_model.objects.create_user(
+            username="volunteer_notified",
+            email="volunteer_notified@example.com",
+            password="testpass123",
+            role="VOLUNTEER",
+        )
+        VolunteerProfile.objects.create(user=volunteer_user, skills="first aid", availability="available", is_available=True)
+
+        resident_user = self.user_model.objects.create_user(
+            username="resident_notified",
+            email="resident_notified@example.com",
+            password="testpass123",
+            role="RESIDENT",
+        )
+        society = Society.objects.create(name="Notification Society")
+        ResidentProfile.objects.create(user=resident_user, society=society, block=None, flat=None)
+
+        sos = SOS.objects.create(user=resident_user, message="Notification incident", location="Block 20", category="medical")
+        sos.record_status_event("TRIGGERED", details="Triggered")
+
+        Notification.objects.create(
+            user=volunteer_user,
+            title="Community Broadcast",
+            body="A community broadcast has been sent for SOS.",
+            kind="SOS",
+            data={"type": "COMMUNITY_BROADCAST", "alert_id": str(sos.id), "recipient_role": "VOLUNTEER", "broadcast": True},
+        )
+
+        self.client.force_authenticate(user=volunteer_user)
+        list_response = self.client.get("/api/sos/alerts/")
+        self.assertEqual(list_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(list_response.data), 1)
+        self.assertEqual(list_response.data[0]["id"], sos.id)
+
+        status_response = self.client.get(f"/api/sos/{sos.id}/status/")
+        self.assertEqual(status_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(status_response.data["current_status"], "TRIGGERED")
+
+    def test_volunteer_can_view_status_for_visible_incident(self):
+        volunteer_user = self.user_model.objects.create_user(
+            username="volunteer_status_visible",
+            email="volunteer_status_visible@example.com",
+            password="testpass123",
+            role="VOLUNTEER",
+        )
+        society = Society.objects.create(name="Status Society")
+        VolunteerProfile.objects.create(user=volunteer_user, society=society, skills="first aid", availability="available", is_available=True)
+
+        resident_user = self.user_model.objects.create_user(
+            username="resident_status_visible",
+            email="resident_status_visible@example.com",
+            password="testpass123",
+            role="RESIDENT",
+        )
+        ResidentProfile.objects.create(user=resident_user, society=society, block=None, flat=None)
+
+        sos = SOS.objects.create(user=resident_user, message="Visible status incident", location="Block 12", category="medical")
+        sos.record_status_event("TRIGGERED", details="Triggered")
+
+        self.client.force_authenticate(user=volunteer_user)
+        response = self.client.get(f"/api/sos/{sos.id}/status/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["current_status"], "TRIGGERED")
+
+    def test_guardian_receives_notifications_and_can_view_linked_resident_incident(self):
+        resident_user = self.user_model.objects.create_user(
+            username="guardian_resident",
+            email="guardian_resident@example.com",
+            password="testpass123",
+            role="RESIDENT",
+        )
+        guardian_user = self.user_model.objects.create_user(
+            username="guardian_linked",
+            email="guardian_linked@example.com",
+            password="testpass123",
+            role="GUARDIAN",
+        )
+        GuardianProfile.objects.create(user=guardian_user, resident_name=resident_user.username, relationship="Mother")
+
+        self.client.force_authenticate(user=resident_user)
+        response = self.client.post(
+            "/api/sos/trigger/",
+            {"message": "Guarded incident", "location": "Block 13", "category": "medical"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(Notification.objects.filter(user=guardian_user, kind="SOS").count(), 1)
+
+        self.client.force_authenticate(user=guardian_user)
+        list_response = self.client.get("/api/sos/alerts/")
+        self.assertEqual(list_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(list_response.data), 1)
+
+        detail_response = self.client.get(f"/api/sos/{response.data['id']}/")
+        self.assertEqual(detail_response.status_code, status.HTTP_200_OK)
+
+        status_response = self.client.get(f"/api/sos/{response.data['id']}/status/")
+        self.assertEqual(status_response.status_code, status.HTTP_200_OK)
+
+        patch_response = self.client.patch(f"/api/sos/{response.data['id']}/", {"action": "accept"}, format="json")
+        self.assertEqual(patch_response.status_code, status.HTTP_403_FORBIDDEN)
+
     def test_status_list_supports_search_filter_ordering_and_pagination(self):
         society = "Lakeview"
         first_sos = SOS.objects.create(user=self.resident_user, message="Need help", location="Block 1", category="medical")
@@ -126,6 +375,69 @@ class SOSStatusTrackingTests(TestCase):
         self.assertEqual(response.data["count"], 2)
         self.assertEqual(len(response.data["results"]), 1)
         self.assertEqual(response.data["results"][0]["incident_id"], second_sos.id)
+
+    def test_response_updates_endpoint_allows_admin_to_read_and_post(self):
+        sos = SOS.objects.create(user=self.resident_user, message="Need help", location="Block 1", category="medical")
+        self.client.force_authenticate(user=self.admin_user)
+
+        response = self.client.get(f"/api/sos/{sos.id}/updates/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 0)
+
+        post_response = self.client.post(
+            f"/api/sos/{sos.id}/updates/",
+            {"message": "Incident update", "update_type": "Response"},
+            format="json",
+        )
+        self.assertEqual(post_response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(post_response.data["message"], "Incident update")
+        self.assertEqual(post_response.data["role"], "ADMIN")
+
+    def test_resident_can_view_their_own_incident_updates_but_cannot_post(self):
+        sos = SOS.objects.create(user=self.resident_user, message="Need help", location="Block 2", category="medical")
+        ResponseUpdate.objects.create(incident=sos, user=self.admin_user, role="ADMIN", message="Admin posted", update_type="Response")
+
+        self.client.force_authenticate(user=self.resident_user)
+        get_response = self.client.get(f"/api/sos/{sos.id}/updates/")
+        self.assertEqual(get_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(get_response.data["count"], 1)
+
+        post_response = self.client.post(
+            f"/api/sos/{sos.id}/updates/",
+            {"message": "Resident attempt", "update_type": "Update"},
+            format="json",
+        )
+        self.assertEqual(post_response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_security_can_post_update_for_visible_incident(self):
+        security_user = self.user_model.objects.create_user(
+            username="security_update",
+            email="security_update@example.com",
+            password="testpass123",
+            role="SECURITY",
+        )
+        sos = SOS.objects.create(user=self.resident_user, message="Need help", location="Block 3", category="medical")
+
+        self.client.force_authenticate(user=security_user)
+        post_response = self.client.post(
+            f"/api/sos/{sos.id}/updates/",
+            {"message": "Security response", "update_type": "Update"},
+            format="json",
+        )
+        self.assertEqual(post_response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(post_response.data["role"], "SECURITY")
+
+    def test_blank_incident_update_message_is_rejected(self):
+        sos = SOS.objects.create(user=self.resident_user, message="Need help", location="Block 4", category="medical")
+        self.client.force_authenticate(user=self.admin_user)
+
+        post_response = self.client.post(
+            f"/api/sos/{sos.id}/updates/",
+            {"message": "   ", "update_type": "Response"},
+            format="json",
+        )
+        self.assertEqual(post_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("message", post_response.data)
 
 
 class SOSResponseMonitoringTests(TestCase):
@@ -299,11 +611,383 @@ class SOSDashboardAggregationTests(TestCase):
         self.assertEqual(len(response.data["results"]), 1)
         self.assertEqual(response.data["results"][0]["type"], "SOS")
 
-    def test_dashboard_requires_admin_access(self):
-        self.client.force_authenticate(user=self.resident_user)
+    def test_dashboard_allows_security_access_for_assigned_society(self):
+        security_user = self.user_model.objects.create_user(
+            username="security_dashboard",
+            email="security_dashboard@example.com",
+            password="testpass123",
+            role="SECURITY",
+        )
+        SecurityProfile.objects.create(user=security_user, society=self.society, employee_id="EMP-1", shift="Day")
+
+        same_society_resident = self.user_model.objects.create_user(
+            username="same_society_resident",
+            email="same_society_resident@example.com",
+            password="testpass123",
+            role="RESIDENT",
+        )
+        other_society_resident = self.user_model.objects.create_user(
+            username="other_society_resident",
+            email="other_society_resident@example.com",
+            password="testpass123",
+            role="RESIDENT",
+        )
+        ResidentProfile.objects.create(user=same_society_resident, society=self.society, block=None, flat=None)
+        other_society = Society.objects.create(
+            name="Greenview Society",
+            address="2 Main Road",
+            city="Bengaluru",
+            state="KA",
+            pincode="560002",
+        )
+        ResidentProfile.objects.create(user=other_society_resident, society=other_society, block=None, flat=None)
+
+        same_society_sos = SOS.objects.create(user=same_society_resident, message="Same society alert", location="Block 1", category="medical")
+        same_society_sos.record_status_event("TRIGGERED")
+        other_society_sos = SOS.objects.create(user=other_society_resident, message="Other society alert", location="Block 2", category="fire")
+        other_society_sos.record_status_event("TRIGGERED")
+
+        self.client.force_authenticate(user=security_user)
         response = self.client.get("/api/sos/dashboard/overview/")
 
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["overview"]["total_incidents"], 1)
+        self.assertEqual(response.data["overview"]["active_incidents"], 1)
+        self.assertEqual(response.data["overview"]["active_societies"], 1)
+
+    def test_dashboard_recent_activity_filters_for_security_society(self):
+        security_user = self.user_model.objects.create_user(
+            username="security_activity",
+            email="security_activity@example.com",
+            password="testpass123",
+            role="SECURITY",
+        )
+        SecurityProfile.objects.create(user=security_user, society=self.society, employee_id="EMP-2", shift="Night")
+
+        same_society_resident = self.user_model.objects.create_user(
+            username="activity_same_society",
+            email="activity_same_society@example.com",
+            password="testpass123",
+            role="RESIDENT",
+        )
+        other_society_resident = self.user_model.objects.create_user(
+            username="activity_other_society",
+            email="activity_other_society@example.com",
+            password="testpass123",
+            role="RESIDENT",
+        )
+        ResidentProfile.objects.create(user=same_society_resident, society=self.society, block=None, flat=None)
+        other_society = Society.objects.create(
+            name="Riverside Society",
+            address="3 Main Road",
+            city="Bengaluru",
+            state="KA",
+            pincode="560003",
+        )
+        ResidentProfile.objects.create(user=other_society_resident, society=other_society, block=None, flat=None)
+
+        same_society_sos = SOS.objects.create(user=same_society_resident, message="Visible to security", location="Block 3", category="medical")
+        same_society_sos.record_status_event("TRIGGERED")
+        other_society_sos = SOS.objects.create(user=other_society_resident, message="Hidden from security", location="Block 4", category="fire")
+        other_society_sos.record_status_event("TRIGGERED")
+
+        self.client.force_authenticate(user=security_user)
+        response = self.client.get("/api/sos/dashboard/recent-activity/?page=1&page_size=10")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["description"], "Visible to security")
+
+    def test_dashboard_denies_non_authorized_roles(self):
+        for index, role in enumerate(["RESIDENT", "VOLUNTEER", "GUARDIAN"]):
+            user = self.user_model.objects.create_user(
+                username=f"{role.lower()}_dashboard_{index}",
+                email=f"{role.lower()}_dashboard_{index}@example.com",
+                password="testpass123",
+                role=role,
+            )
+            self.client.force_authenticate(user=user)
+            response = self.client.get("/api/sos/dashboard/overview/")
+            self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_security_dashboard_returns_admin_data(self):
+        ResidentProfile.objects.create(user=self.resident_user, society=self.society, block=None, flat=None)
+
+        active_sos = SOS.objects.create(user=self.resident_user, message="Active alert", location="Block 1", category="medical")
+        active_sos.record_status_event("TRIGGERED")
+        resolved_sos = SOS.objects.create(user=self.resident_user, message="Resolved alert", location="Block 2", category="fire")
+        resolved_sos.record_status_event("TRIGGERED")
+        resolved_sos.record_status_event("INCIDENT_CLOSED")
+
+        self.client.force_authenticate(user=self.admin_user)
+        response = self.client.get("/api/sos/security-dashboard/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["summary"]["total_incidents"], 2)
+        self.assertEqual(response.data["summary"]["active_incidents"], 1)
+        self.assertEqual(response.data["summary"]["resolved_incidents"], 1)
+        self.assertEqual(response.data["summary"]["active_societies"], 1)
+        self.assertEqual(len(response.data["recent_activity"]), 2)
+        self.assertEqual(len(response.data["active_incidents"]), 1)
+
+    def test_security_dashboard_filters_for_security_society(self):
+        security_user = self.user_model.objects.create_user(
+            username="security_dashboard_scope",
+            email="security_dashboard_scope@example.com",
+            password="testpass123",
+            role="SECURITY",
+        )
+        SecurityProfile.objects.create(user=security_user, society=self.society, employee_id="EMP-9", shift="Day")
+
+        same_society_resident = self.user_model.objects.create_user(
+            username="same_society_security",
+            email="same_society_security@example.com",
+            password="testpass123",
+            role="RESIDENT",
+        )
+        other_society_resident = self.user_model.objects.create_user(
+            username="other_society_security",
+            email="other_society_security@example.com",
+            password="testpass123",
+            role="RESIDENT",
+        )
+        ResidentProfile.objects.create(user=same_society_resident, society=self.society, block=None, flat=None)
+        other_society = Society.objects.create(
+            name="Greenview Society",
+            address="2 Main Road",
+            city="Bengaluru",
+            state="KA",
+            pincode="560002",
+        )
+        ResidentProfile.objects.create(user=other_society_resident, society=other_society, block=None, flat=None)
+
+        same_society_sos = SOS.objects.create(user=same_society_resident, message="Visible to security", location="Block 1", category="medical")
+        same_society_sos.record_status_event("TRIGGERED")
+        other_society_sos = SOS.objects.create(user=other_society_resident, message="Hidden from security", location="Block 2", category="fire")
+        other_society_sos.record_status_event("TRIGGERED")
+
+        self.client.force_authenticate(user=security_user)
+        response = self.client.get("/api/sos/security-dashboard/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["summary"]["total_incidents"], 1)
+        self.assertEqual(response.data["summary"]["active_incidents"], 1)
+        self.assertEqual(response.data["summary"]["active_societies"], 1)
+        self.assertEqual(len(response.data["recent_activity"]), 1)
+        self.assertEqual(response.data["recent_activity"][0]["description"], "Visible to security")
+        self.assertEqual(len(response.data["active_incidents"]), 1)
+        self.assertEqual(response.data["active_incidents"][0]["title"], "Visible to security")
+
+    def test_security_dashboard_blocks_other_societies_for_security(self):
+        security_user = self.user_model.objects.create_user(
+            username="security_dashboard_other",
+            email="security_dashboard_other@example.com",
+            password="testpass123",
+            role="SECURITY",
+        )
+        SecurityProfile.objects.create(user=security_user, society=self.society, employee_id="EMP-10", shift="Day")
+
+        resident = self.user_model.objects.create_user(
+            username="other_society_only",
+            email="other_society_only@example.com",
+            password="testpass123",
+            role="RESIDENT",
+        )
+        other_society = Society.objects.create(
+            name="Sunset Society",
+            address="4 Main Road",
+            city="Bengaluru",
+            state="KA",
+            pincode="560004",
+        )
+        ResidentProfile.objects.create(user=resident, society=other_society, block=None, flat=None)
+
+        sos = SOS.objects.create(user=resident, message="Hidden", location="Block 3", category="medical")
+        sos.record_status_event("TRIGGERED")
+
+        self.client.force_authenticate(user=security_user)
+        response = self.client.get("/api/sos/security-dashboard/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["summary"]["total_incidents"], 0)
+        self.assertEqual(response.data["recent_activity"], [])
+        self.assertEqual(response.data["active_incidents"], [])
+
+    def test_security_dashboard_returns_empty_for_security_without_society(self):
+        security_user = self.user_model.objects.create_user(
+            username="security_dashboard_no_society",
+            email="security_dashboard_no_society@example.com",
+            password="testpass123",
+            role="SECURITY",
+        )
+
+        self.client.force_authenticate(user=security_user)
+        response = self.client.get("/api/sos/security-dashboard/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["summary"]["total_incidents"], 0)
+        self.assertEqual(response.data["summary"]["active_incidents"], 0)
+        self.assertEqual(response.data["summary"]["resolved_incidents"], 0)
+        self.assertEqual(response.data["summary"]["active_societies"], 0)
+        self.assertEqual(response.data["recent_activity"], [])
+        self.assertEqual(response.data["active_incidents"], [])
+
+    def test_security_dashboard_denies_resident_volunteer_and_guardian(self):
+        for index, role in enumerate(["RESIDENT", "VOLUNTEER", "GUARDIAN"]):
+            user = self.user_model.objects.create_user(
+                username=f"{role.lower()}_security_dashboard_{index}",
+                email=f"{role.lower()}_security_dashboard_{index}@example.com",
+                password="testpass123",
+                role=role,
+            )
+            self.client.force_authenticate(user=user)
+            response = self.client.get("/api/sos/security-dashboard/")
+            self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class SecurityDay18APITests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user_model = get_user_model()
+        self.security_user = self.user_model.objects.create_user(
+            username="security_day18",
+            email="security_day18@example.com",
+            password="testpass123",
+            role="SECURITY",
+        )
+        self.resident_user = self.user_model.objects.create_user(
+            username="resident_day18",
+            email="resident_day18@example.com",
+            password="testpass123",
+            role="RESIDENT",
+        )
+        self.other_resident = self.user_model.objects.create_user(
+            username="other_resident_day18",
+            email="other_resident_day18@example.com",
+            password="testpass123",
+            role="RESIDENT",
+        )
+        self.society = Society.objects.create(
+            name="Day18 Society",
+            address="1 Day Road",
+            city="Bengaluru",
+            state="KA",
+            pincode="560001",
+        )
+        self.other_society = Society.objects.create(
+            name="Other Society",
+            address="2 Day Road",
+            city="Bengaluru",
+            state="KA",
+            pincode="560002",
+        )
+        SecurityProfile.objects.create(user=self.security_user, society=self.society, employee_id="EMP-18", shift="Day")
+        ResidentProfile.objects.create(user=self.resident_user, society=self.society, block=None, flat=None)
+        ResidentProfile.objects.create(user=self.other_resident, society=self.other_society, block=None, flat=None)
+
+    def test_security_coordination_endpoint_returns_incident_details_for_same_society(self):
+        sos = SOS.objects.create(user=self.resident_user, message="Security coordination incident", location="Block A", category="medical")
+        sos.record_status_event("TRIGGERED")
+        self.client.force_authenticate(user=self.security_user)
+
+        response = self.client.get(f"/api/sos/{sos.id}/coordination/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["id"], sos.id)
+        self.assertEqual(response.data["society"]["name"], self.society.name)
+        self.assertEqual(response.data["coordination"]["status"], sos.status)
+        self.assertEqual(response.data["coordination"]["incident_owner"], self.resident_user.username)
+
+    def test_security_coordination_endpoint_requires_authentication(self):
+        sos = SOS.objects.create(user=self.resident_user, message="Test", location="Block A", category="medical")
+
+        response = self.client.get(f"/api/sos/{sos.id}/coordination/")
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_security_coordination_endpoint_rejects_non_security_users(self):
+        sos = SOS.objects.create(user=self.resident_user, message="Test", location="Block A", category="medical")
+        self.client.force_authenticate(user=self.resident_user)
+
+        response = self.client.get(f"/api/sos/{sos.id}/coordination/")
+
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_security_coordination_endpoint_blocks_cross_society_access(self):
+        sos = SOS.objects.create(user=self.other_resident, message="Cross society", location="Block B", category="fire")
+        self.client.force_authenticate(user=self.security_user)
+
+        response = self.client.get(f"/api/sos/{sos.id}/coordination/")
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_security_coordination_endpoint_returns_not_found_for_invalid_incident_id(self):
+        self.client.force_authenticate(user=self.security_user)
+
+        response = self.client.get("/api/sos/999999/coordination/")
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_security_response_update_endpoint_accepts_valid_status_update(self):
+        sos = SOS.objects.create(user=self.resident_user, message="Need help", location="Block 1", category="medical")
+        self.client.force_authenticate(user=self.security_user)
+
+        response = self.client.post(
+            f"/api/sos/{sos.id}/updates/",
+            {"message": "Security acknowledged the incident.", "status": "ACKNOWLEDGED"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["message"], "Security acknowledged the incident.")
+        sos.refresh_from_db()
+        self.assertEqual(sos.status, "ACTIVE")
+        self.assertTrue(ResponseUpdate.objects.filter(incident=sos, user=self.security_user).exists())
+
+    def test_security_response_update_endpoint_rejects_invalid_status_transition(self):
+        sos = SOS.objects.create(user=self.resident_user, message="Need help", location="Block 1", category="medical", status="CLOSED")
+        self.client.force_authenticate(user=self.security_user)
+
+        response = self.client.post(
+            f"/api/sos/{sos.id}/updates/",
+            {"message": "Attempt to reopen.", "status": "OPEN"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("status", response.data)
+
+    def test_security_response_update_endpoint_blocks_cross_society_incident(self):
+        sos = SOS.objects.create(user=self.other_resident, message="Cross society", location="Block B", category="fire")
+        self.client.force_authenticate(user=self.security_user)
+
+        response = self.client.post(
+            f"/api/sos/{sos.id}/updates/",
+            {"message": "Unauthorized security update."},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_reporting_summary_returns_security_society_aggregates(self):
+        active_sos = SOS.objects.create(user=self.resident_user, message="Active security alert", location="Block 1", category="medical")
+        active_sos.record_status_event("TRIGGERED")
+        escalated_sos = SOS.objects.create(user=self.resident_user, message="Escalated security alert", location="Block 2", category="fire")
+        escalated_sos.status = "ESCALATED"
+        escalated_sos.save(update_fields=["status"])
+        resolved_sos = SOS.objects.create(user=self.resident_user, message="Resolved security alert", location="Block 3", category="medical")
+        resolved_sos.record_status_event("TRIGGERED")
+        resolved_sos.record_status_event("INCIDENT_CLOSED")
+
+        self.client.force_authenticate(user=self.security_user)
+        response = self.client.get("/api/sos/reporting-summary/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["summary"]["total_incidents"], 3)
+        self.assertEqual(response.data["summary"]["active_incidents"], 2)
+        self.assertEqual(response.data["summary"]["escalated_incidents"], 1)
+        self.assertEqual(response.data["summary"]["resolved_incidents"], 1)
+        self.assertEqual(response.data["society"]["name"], self.society.name)
 
 
 class SOSCategoryFlowTests(TestCase):
@@ -416,6 +1100,8 @@ class SOSCategoryFlowTests(TestCase):
             password="testpass123",
             role="GUARDIAN",
         )
+        # Link guardian to resident via GuardianProfile so they are selected as recipients
+        GuardianProfile.objects.create(user=guardian_user, resident_name=self.user.username, relationship="Parent")
         volunteer_user = self.user_model.objects.create_user(
             username="volunteer_route",
             email="volunteer_route@example.com",

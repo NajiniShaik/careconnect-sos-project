@@ -12,6 +12,11 @@ from .views import (
     ResponseMonitoringDetailView,
     DashboardOverviewView,
     DashboardRecentActivityView,
+    SecurityDashboardView,
+    SecurityIncidentCoordinationView,
+    SecurityReportingSummaryView,
+    ChatHistoryView,
+    SOSResponseUpdateView,
 )
 
 urlpatterns = [
@@ -25,9 +30,14 @@ urlpatterns = [
     path("response-monitor/<int:pk>/", ResponseMonitoringDetailView.as_view()),
     path("dashboard/overview/", DashboardOverviewView.as_view()),
     path("dashboard/recent-activity/", DashboardRecentActivityView.as_view()),
+    path("security-dashboard/", SecurityDashboardView.as_view()),
+    path("reporting-summary/", SecurityReportingSummaryView.as_view()),
+    path("<int:pk>/coordination/", SecurityIncidentCoordinationView.as_view()),
     path("<int:pk>/status/", SOSStatusTrackingView.as_view()),
     path("<int:pk>/", SOSAlertManagementView.as_view()),
     path("<int:pk>/message/", SOSMessageView.as_view()),
     path("<int:pk>/messages/", SOSMessageView.as_view()),
+    path("<int:pk>/chat/", ChatHistoryView.as_view()),
     path("<int:pk>/transcribe/", SOSRetryTranscriptionView.as_view()),
+    path("<int:pk>/updates/", SOSResponseUpdateView.as_view()),
 ]

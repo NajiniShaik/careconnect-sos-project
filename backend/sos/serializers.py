@@ -1,6 +1,7 @@
 from django.utils import timezone
 from rest_framework import serializers
-from .models import SOS, SOSMessage, SOSStatusEvent
+from .models import SOS, SOSMessage, SOSStatusEvent, ChatMessage
+from .models import ResponseUpdate
 
 
 class UserSummarySerializer(serializers.Serializer):
@@ -16,11 +17,14 @@ class SOSSerializer(serializers.ModelSerializer):
     transcript = serializers.SerializerMethodField()
     transcription_status = serializers.SerializerMethodField()
     transcription_completed_at = serializers.SerializerMethodField()
+    current_status = serializers.SerializerMethodField()
+    current_stage = serializers.SerializerMethodField()
 
     class Meta:
         model = SOS
         fields = (
             "id",
+            "assigned_volunteer",
             "user",
             "message",
             "location",
@@ -32,7 +36,14 @@ class SOSSerializer(serializers.ModelSerializer):
             "state",
             "country",
             "status",
+            "current_status",
+            "current_stage",
             "priority",
+            "closure_notes",
+            "resolution_summary",
+            "actions_taken",
+            "additional_remarks",
+            "closed_at",
             "transcript",
             "transcription_status",
             "transcription_completed_at",
@@ -66,20 +77,61 @@ class SOSSerializer(serializers.ModelSerializer):
         message = self._get_latest_message(obj)
         return message.transcription_completed_at if message else obj.transcription_completed_at
 
+    def get_current_status(self, obj):
+        return obj.get_current_lifecycle_status()
+
+    def get_current_stage(self, obj):
+        # Map event-driven lifecycle to a human-friendly stage
+        latest = obj.get_current_lifecycle_status()
+        if latest == "INCIDENT_CLOSED":
+            return "Closed"
+        if latest == "GUARDIAN_RESPONDED":
+            return "Waiting for Volunteer"
+        if latest == "VOLUNTEER_ACCEPTED":
+            return "Waiting for Security"
+        if latest == "SECURITY_RESPONDED":
+            return "Closed"
+        if latest in {"GUARDIAN_NOTIFIED", "AUTO_ESCALATED"}:
+            return "Waiting for Guardian"
+        if latest in {"VOLUNTEER_NOTIFIED"}:
+            return "Waiting for Volunteer"
+        if latest in {"SECURITY_NOTIFIED"}:
+            return "Waiting for Security"
+        if obj.status == "ESCALATED":
+            return "Escalated"
+        return "Active"
+
 
 class SOSStatusUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = SOS
-        fields = ("status", "priority")
+        fields = (
+            "status",
+            "priority",
+            "closure_notes",
+            "resolution_summary",
+            "actions_taken",
+            "additional_remarks",
+            "closed_at",
+        )
 
     def validate_status(self, value):
         if not isinstance(value, str):
             raise serializers.ValidationError("Status must be a string")
 
         normalized_value = value.upper()
-        allowed_statuses = {"OPEN", "IN_PROGRESS", "RESOLVED"}
+        allowed_statuses = {"OPEN", "IN_PROGRESS", "ACTIVE", "ESCALATED", "RESOLVED", "CLOSED"}
         if normalized_value not in allowed_statuses:
-            raise serializers.ValidationError("Status must be one of OPEN, IN_PROGRESS, or RESOLVED")
+            raise serializers.ValidationError("Status must be one of OPEN, IN_PROGRESS, ACTIVE, ESCALATED, RESOLVED, or CLOSED")
+
+        instance = getattr(self, "instance", None)
+        if instance is not None:
+            try:
+                if not instance.can_transition_to(normalized_value):
+                    raise serializers.ValidationError(f"Invalid status transition from {instance.status} to {normalized_value}")
+            except AttributeError:
+                pass
+
         return normalized_value
 
     def validate_priority(self, value):
@@ -94,6 +146,41 @@ class SOSStatusUpdateSerializer(serializers.ModelSerializer):
         if normalized_value not in allowed_priorities:
             raise serializers.ValidationError("Priority must be one of LOW, MEDIUM, HIGH, or CRITICAL")
         return normalized_value
+
+    def validate_closure_notes(self, value):
+        if value is None:
+            return value
+        if not isinstance(value, str):
+            raise serializers.ValidationError("Closure notes must be a string")
+        return value.strip()
+
+    def validate_resolution_summary(self, value):
+        if value is None:
+            return value
+        if not isinstance(value, str):
+            raise serializers.ValidationError("Resolution summary must be a string")
+        return value.strip()
+
+    def validate_actions_taken(self, value):
+        if value is None:
+            return value
+        if not isinstance(value, str):
+            raise serializers.ValidationError("Actions taken must be a string")
+        return value.strip()
+
+    def validate_additional_remarks(self, value):
+        if value is None:
+            return value
+        if not isinstance(value, str):
+            raise serializers.ValidationError("Additional remarks must be a string")
+        return value.strip()
+
+    def validate_closed_at(self, value):
+        if value is None:
+            return value
+        if not isinstance(value, str) and not isinstance(value, (timezone.datetime, timezone.date)):
+            raise serializers.ValidationError("closed_at must be a date/time string")
+        return value
 
 
 class SOSResidentUpdateSerializer(serializers.ModelSerializer):
@@ -143,10 +230,55 @@ class SOSResidentUpdateSerializer(serializers.ModelSerializer):
         return normalized_value
 
 
+class ChatMessageSerializer(serializers.ModelSerializer):
+    sender = UserSummarySerializer(read_only=True)
+
+    class Meta:
+        model = ChatMessage
+        fields = ("id", "incident", "sender", "message", "created_at", "edited_at", "is_system_message")
+        read_only_fields = ("id", "incident", "sender", "created_at", "edited_at", "is_system_message")
+
+
 class SOSStatusEventSerializer(serializers.ModelSerializer):
     class Meta:
         model = SOSStatusEvent
         fields = ("status", "details", "occurred_at")
+
+
+class ResponseUpdateSerializer(serializers.ModelSerializer):
+    user = UserSummarySerializer(read_only=True)
+    role = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
+    class Meta:
+        model = ResponseUpdate
+        fields = ("id", "incident", "user", "role", "message", "update_type", "created_at")
+        read_only_fields = ("id", "incident", "user", "created_at")
+
+    def validate_role(self, value):
+        if value is None:
+            return value
+        if not isinstance(value, str):
+            raise serializers.ValidationError("Role must be a string")
+        normalized = value.strip().upper()
+        if not normalized:
+            return None
+        return normalized
+
+    def validate_message(self, value):
+        if value is None:
+            raise serializers.ValidationError("Message cannot be empty.")
+
+        normalized = str(value).strip()
+        if not normalized:
+            raise serializers.ValidationError("Message cannot be empty.")
+
+        return normalized
+
+    def create(self, validated_data):
+        # incident will be provided by the view via serializer.save(incident=...)
+        message = validated_data.get("message", "")
+        validated_data["message"] = str(message).strip()
+        return super().create(validated_data)
 
 
 class SOSStatusDetailSerializer(serializers.ModelSerializer):

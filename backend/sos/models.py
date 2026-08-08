@@ -9,8 +9,9 @@ class SOS(models.Model):
         ("OPEN", "Open"),
         ("ACTIVE", "Active"),
         ("IN_PROGRESS", "In Progress"),
-        ("RESOLVED", "Resolved"),
         ("ESCALATED", "Escalated"),
+        ("RESOLVED", "Resolved"),
+        ("CLOSED", "Closed"),
     ]
 
     PRIORITY_CHOICES = [
@@ -44,10 +45,24 @@ class SOS(models.Model):
         choices=STATUS_CHOICES,
         default="OPEN"
     )
+    closure_notes = models.TextField(blank=True, null=True)
+    resolution_summary = models.TextField(blank=True, null=True)
+    actions_taken = models.TextField(blank=True, null=True)
+    additional_remarks = models.TextField(blank=True, null=True)
+    closed_at = models.DateTimeField(blank=True, null=True)
     priority = models.CharField(
         max_length=20,
         choices=PRIORITY_CHOICES,
         default="HIGH"
+    )
+
+    # Assigned volunteer for the SOS. Null when unassigned.
+    assigned_volunteer = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="assigned_sos"
     )
 
     escalation_level = models.PositiveIntegerField(default=0)
@@ -57,6 +72,33 @@ class SOS(models.Model):
 
     def __str__(self):
         return f"SOS({self.user.username}) - {self.status}"
+
+    def can_transition_to(self, new_status: str) -> bool:
+        """Return True if SOS can transition from current status to new_status.
+
+        Allowed lifecycle (Day 15): OPEN -> ACTIVE -> ESCALATED -> RESOLVED -> CLOSED
+        Also allow ADMIN to set IN_PROGRESS interchangeably with ACTIVE for compatibility.
+        """
+        if not new_status:
+            return False
+
+        current = (self.status or "OPEN").upper()
+        target = str(new_status).upper()
+
+        if current == target:
+            return True
+
+        # Define allowed forward-only transitions
+        allowed = {
+            "OPEN": {"ACTIVE", "IN_PROGRESS", "ESCALATED", "RESOLVED", "CLOSED"},
+            "IN_PROGRESS": {"ACTIVE", "ESCALATED", "RESOLVED", "CLOSED"},
+            "ACTIVE": {"ESCALATED", "RESOLVED", "CLOSED"},
+            "ESCALATED": {"RESOLVED", "CLOSED"},
+            "RESOLVED": {"CLOSED"},
+            "CLOSED": set(),
+        }
+
+        return target in allowed.get(current, set())
 
     def record_status_event(self, status, details="", occurred_at=None):
         event = SOSStatusEvent.objects.create(
@@ -117,3 +159,34 @@ class SOSMessage(models.Model):
 
     def __str__(self):
         return f"SOSMessage({self.sos_id}) - {self.sender.username}"
+
+
+class ChatMessage(models.Model):
+    incident = models.ForeignKey(SOS, on_delete=models.CASCADE, related_name="chat_messages")
+    sender = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="chat_messages")
+    message = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    edited_at = models.DateTimeField(blank=True, null=True)
+    is_system_message = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ("created_at", "id")
+
+    def __str__(self):
+        return f"ChatMessage({self.incident_id}) - {self.sender.username}"
+
+
+class ResponseUpdate(models.Model):
+    """Updates posted by responders/admins regarding an SOS incident."""
+    incident = models.ForeignKey(SOS, on_delete=models.CASCADE, related_name="updates")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="response_updates")
+    role = models.CharField(max_length=20)
+    message = models.TextField(blank=True)
+    update_type = models.CharField(max_length=50, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("created_at", "id")
+
+    def __str__(self):
+        return f"ResponseUpdate({self.incident_id}) by {self.user.username}"
