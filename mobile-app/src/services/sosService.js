@@ -120,7 +120,8 @@ export function buildSosRequestPayload(message = 'Emergency alert triggered from
 }
 
 export function getSosStatusLabel(status) {
-  switch (status?.toUpperCase()) {
+  if (!status) return '';
+  switch (String(status).toUpperCase()) {
     case 'PENDING':
       return 'Pending';
     case 'RESOLVED':
@@ -129,8 +130,19 @@ export function getSosStatusLabel(status) {
       return 'Rejected';
     case 'OPEN':
       return 'Open';
+    case 'ESCALATED':
+      return 'Escalated';
+    case 'IN_PROGRESS':
+    case 'INPROGRESS':
+      return 'In progress';
+    case 'VOLUNTEER_ACCEPTED':
+    case 'ACCEPTED':
+      return 'Accepted';
+    case 'CANCELLED':
+    case 'CLOSED':
+      return 'Closed';
     default:
-      return 'Unknown';
+      return String(status);
   }
 }
 
@@ -151,15 +163,42 @@ function normalizeOwnerValue(owner) {
 }
 
 export function normalizeSosEvent(event = {}) {
+  // Map canonical backend fields to UI-friendly keys without fabricating values.
+  const assigned = event.assigned_volunteer || event.assignedVolunteer || event.assigned_volunteer_id || event.assignedVolunteerId || null;
+  const assignedId = assigned && typeof assigned === 'object' ? (assigned.id || assigned.pk || null) : assigned;
+  const assignedName = assigned && typeof assigned === 'object' ? (assigned.username || assigned.name || assigned.email || '') : (typeof assigned === 'string' ? assigned : '');
+
   return {
     id: event.id,
+    alertId: event.id,
     status: event.status,
-    message: event.message || event.details || 'Emergency alert',
-    location: event.location || 'Location unavailable',
+    current_status: event.current_status || event.currentStatus || null,
+    message: event.message || event.details || '',
+    location: event.location || event.address || '',
+    address: event.address || event.location || '',
+    city: event.city || '',
+    state: event.state || '',
+    country: event.country || '',
+    latitude: event.latitude != null ? Number(event.latitude) : null,
+    longitude: event.longitude != null ? Number(event.longitude) : null,
+    sosType: event.category || event.category_name || event.categoryValue || event.category_label || '',
     user: normalizeOwnerValue(event.user),
     userDetails: event.user || null,
-    category: event.category || event.category_name || event.categoryValue || event.category_label || '',
+    residentPhone:
+      (event.user && (event.user.phone || event.user.phone_number || event.user.mobile || event.user.contact_number)) ||
+      event.phone ||
+      event.userPhone ||
+      '',
+    residentName: (event.user && (event.user.username || event.user.name)) || normalizeOwnerValue(event.user),
+    society: (event.user && event.user.resident_profile && event.user.resident_profile.society && event.user.resident_profile.society.name) || event.society || '',
+    blockFlat: event.block || event.flat || event.block_flat || '',
+    time: event.created_at || event.createdAt || event.updated_at || event.updatedAt || null,
     created_at: event.created_at || event.createdAt || 'Just now',
+    updated_at: event.updated_at || event.updatedAt || null,
+    distance: event.distance || null,
+    assigned_volunteer: assigned || null,
+    assigned_volunteer_id: assignedId || null,
+    assigned_volunteer_name: assignedName || '',
   };
 }
 
@@ -176,6 +215,14 @@ export function mergeSosEvents(createdEvent, history = []) {
   }
 
   return [createdEvent, ...normalizedHistory];
+}
+
+export function mergeSosMessages(existing = [], next) {
+  const normalized = Array.isArray(existing) ? existing : [];
+  if (!next) return normalized;
+  const found = normalized.find((item) => item?.id === next?.id);
+  if (found) return normalized;
+  return [...normalized, next];
 }
 
 export async function triggerSosRequest(payload = buildSosRequestPayload()) {
@@ -195,6 +242,18 @@ export async function triggerSosRequest(payload = buildSosRequestPayload()) {
   );
 }
 
+export async function fetchSosDashboardOverview() {
+  const token = await getStoredToken();
+  const headers = await getAuthHeaders(token);
+  return api.get('/sos/dashboard/overview/', { headers });
+}
+
+export async function fetchSecurityDashboardData() {
+  const token = await getStoredToken();
+  const headers = await getAuthHeaders(token);
+  return api.get('/sos/security-dashboard/', { headers });
+}
+
 export async function fetchSosCategories() {
   return api.get('/sos/categories/');
 }
@@ -203,7 +262,7 @@ export async function fetchSosHistory() {
   const token = await getStoredToken();
   const headers = await getAuthHeaders(token);
 
-  return api.get('/sos/trigger/', {
+  return api.get('/sos/alerts/', {
     headers,
   });
 }
@@ -217,16 +276,37 @@ export async function fetchSosAlerts() {
   });
 }
 
-export async function resolveSosAlert(id, status = 'RESOLVED') {
+export async function fetchSosAlert(id) {
   const token = await getStoredToken();
   const headers = await getAuthHeaders(token);
   const requestUrl = `/sos/alerts/${id}/`;
 
-  console.log('[sos] PATCH request starting', { url: requestUrl, payload: { status } });
+  console.log(`[sos] GET ${requestUrl}`);
+
+  try {
+    const response = await api.get(requestUrl, { headers });
+    console.log(`[sos] GET ${requestUrl} -> ${response?.status ?? "unknown"}`);
+    return response;
+  } catch (error) {
+    console.log(`[sos] GET ${requestUrl} failed`, {
+      status: error?.response?.status,
+      message: error?.message,
+    });
+    throw error;
+  }
+}
+
+export async function resolveSosAlert(id, status = 'RESOLVED', payload = {}) {
+  const token = await getStoredToken();
+  const headers = await getAuthHeaders(token);
+  const requestUrl = `/sos/alerts/${id}/`;
+  const requestData = { status, ...payload };
+
+  console.log('[sos] PATCH request starting', { url: requestUrl, payload: requestData });
   console.log('[sos] Request URL', { url: requestUrl });
 
   try {
-    const response = await api.patch(requestUrl, { status }, { headers });
+    const response = await api.patch(requestUrl, requestData, { headers });
     console.log('[sos] Response', { url: requestUrl, status: response?.status, body: response?.data });
     return response;
   } catch (error) {
@@ -238,6 +318,10 @@ export async function resolveSosAlert(id, status = 'RESOLVED') {
     });
     throw error;
   }
+}
+
+export async function closeSosAlert(id, payload = {}) {
+  return resolveSosAlert(id, 'CLOSED', payload);
 }
 
 export async function deleteSosAlert(id) {
@@ -400,6 +484,70 @@ export async function fetchSosMessages(id) {
       message: error?.message,
     });
     throw error;
+  }
+}
+
+export async function fetchSosUpdates(id) {
+  const token = await getStoredToken();
+  const headers = await getAuthHeaders(token);
+  const PAGE_SIZE = 50;
+  const requestBase = `/sos/${id}/updates/`;
+
+  console.log(`[sos] GET ${requestBase}`);
+
+  try {
+    let page = 1;
+    const accumulated = [];
+    while (true) {
+      const response = await api.get(requestBase, { headers, params: { page, page_size: PAGE_SIZE } });
+      const data = response?.data || {};
+      const results = Array.isArray(data.results) ? data.results : [];
+      accumulated.push(...results);
+      if (!data.next || results.length === 0) break;
+      page += 1;
+    }
+
+    console.log(`[sos] GET ${requestBase} -> fetched ${accumulated.length}`);
+    return { status: 200, data: accumulated };
+  } catch (error) {
+    console.log(`[sos] GET ${requestBase} failed`, { status: error?.response?.status, message: error?.message });
+    throw error;
+  }
+}
+
+export async function postSosUpdate(id, payload) {
+  const token = await getStoredToken();
+  const headers = await getAuthHeaders(token);
+  const requestUrl = `/sos/${id}/updates/`;
+
+  console.log(`[sos] POST ${requestUrl}`);
+
+  try {
+    const response = await api.post(requestUrl, payload, { headers });
+    console.log(`[sos] POST ${requestUrl} -> ${response?.status ?? "unknown"}`);
+    return response;
+  } catch (error) {
+    console.log(`[sos] POST ${requestUrl} failed`, { status: error?.response?.status, message: error?.message });
+    throw error;
+  }
+}
+
+// Simple in-memory pub/sub for SOS updates so multiple screens can sync after a post
+const SOS_UPDATE_SUBSCRIBERS = new Set();
+
+export function subscribeToSosUpdates(callback) {
+  if (typeof callback !== 'function') return () => {};
+  SOS_UPDATE_SUBSCRIBERS.add(callback);
+  return () => SOS_UPDATE_SUBSCRIBERS.delete(callback);
+}
+
+export function emitSosUpdate(sosId, update) {
+  for (const cb of Array.from(SOS_UPDATE_SUBSCRIBERS)) {
+    try {
+      cb(sosId, update);
+    } catch {
+      // ignore subscriber errors
+    }
   }
 }
 

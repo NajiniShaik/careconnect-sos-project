@@ -1,5 +1,5 @@
 import { Tabs, useRouter } from "expo-router";
-import React, { useCallback, useEffect } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { AppIcon, appColors } from "../../components/common/designSystem";
 import { getStoredToken, getStoredUser } from "../../services/authService";
 import {
@@ -20,6 +20,7 @@ import * as Notifications from "expo-notifications";
 
 export default function AppLayout() {
   const router = useRouter();
+  const [userRole, setUserRole] = useState<string | null>(null);
 
   const verifyAuth = useCallback(async () => {
     const token = await getStoredToken();
@@ -36,29 +37,64 @@ export default function AppLayout() {
     void verifyAuth();
   }, [verifyAuth]);
 
+  useEffect(() => {
+    let mounted = true;
+    void (async () => {
+      try {
+        const currentUser = await getStoredUser();
+        if (!mounted) return;
+        setUserRole(String(currentUser?.role || "").toUpperCase() || null);
+      } catch {
+        if (mounted) {
+          setUserRole(null);
+        }
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const isSecurityDashboardVisible = userRole === "SECURITY" || userRole === "ADMIN";
+
   // initialize notifications when app layout mounts and user is authenticated
   useEffect(() => {
+    console.log("================ INIT EFFECT STARTED ================");
     let unsub: (() => void) | null = null;
     let unsubscribePushTokenListener: (() => void) | null = null;
     const init = async () => {
+      console.log("INIT() ENTERED");
       const token = await getStoredToken();
       const user = await getStoredUser();
+      console.log("[layout] auth state", {
+        hasToken: Boolean(token),
+        hasUser: Boolean(user?.id),
+        username: user?.username,
+        role: user?.role,
+      });
       if (!token || !user?.id) {
         cleanupOnLogout();
         stopNotificationsPolling();
         return;
       }
 
+      console.log("Calling startNotificationsPolling()");
       await startNotificationsPolling();
+      console.log("startNotificationsPolling() completed");
       try {
+        console.log("Calling retryPendingDeviceRegistration()");
         await retryPendingDeviceRegistration();
-      } catch {
-        // ignore pending retry errors; continue to fresh registration attempt
+        console.log("retryPendingDeviceRegistration() completed");
+      } catch (error) {
+        console.error("[layout] retryPendingDeviceRegistration() failed", error);
       }
       try {
+        console.log("Calling ensureDeviceRegistration()");
         await ensureDeviceRegistration();
-      } catch {
-        // ignore registration errors; the service will retry later
+        console.log("ensureDeviceRegistration() completed");
+      } catch (error) {
+        console.error("[layout] ensureDeviceRegistration() failed", error);
       }
 
       const handleNotificationResponse = async (response: Notifications.NotificationResponse) => {
@@ -224,6 +260,15 @@ export default function AppLayout() {
           tabBarIcon: ({ color }) => <AppIcon name="warning-outline" size={18} color={color} />,
         }}
       />
+      {isSecurityDashboardVisible ? (
+        <Tabs.Screen
+          name="security-dashboard"
+          options={{
+            title: "Security",
+            tabBarIcon: ({ color }) => <AppIcon name="shield-outline" size={18} color={color} />,
+          }}
+        />
+      ) : null}
       <Tabs.Screen
         name="contacts"
         options={{
@@ -245,6 +290,7 @@ export default function AppLayout() {
           tabBarIcon: ({ color }) => <AppIcon name="settings-outline" size={18} color={color} />,
         }}
       />
+        <Tabs.Screen name="emergency-chat" options={{ href: null }} />
       <Tabs.Screen name="security-incidents" options={{ href: null }} />
       <Tabs.Screen name="volunteer-incidents" options={{ href: null }} />
     </Tabs>
