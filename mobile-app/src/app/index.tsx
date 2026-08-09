@@ -1,12 +1,12 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { getStoredToken } from '../services/authService';
-import LoginScreen from '../screens/LoginScreen.js'
+import LandingScreen from '../screens/LandingScreen.js';
 
 export default function Home() {
   const router = useRouter();
   const params = useLocalSearchParams();
-  const [showLogin, setShowLogin] = useState(false);
+  const [showLanding, setShowLanding] = useState(false);
   const forcedLogout = params?.logout === '1' || params?.logout === 'true';
 
   const checkAndNavigate = useCallback(async () => {
@@ -14,8 +14,8 @@ export default function Home() {
       console.log("[index] Checking auth state...");
 
       if (forcedLogout) {
-        console.log("[index] Forced logout detected, showing login screen");
-        setShowLogin(true);
+        console.log("[index] Forced logout detected, showing landing screen");
+        setShowLanding(true);
         return;
       }
 
@@ -25,12 +25,12 @@ export default function Home() {
         console.log("[index] Token found, navigating to dashboard");
         router.replace("/dashboard");
       } else {
-        console.log("[index] No token, showing login screen");
-        setShowLogin(true);
+        console.log("[index] No token, showing landing screen");
+        setShowLanding(true);
       }
     } catch (error) {
       console.error("[index] Error checking auth:", error);
-      setShowLogin(true);
+      setShowLanding(true);
     }
   }, [forcedLogout, router]);
 
@@ -49,5 +49,5 @@ export default function Home() {
     }, [checkAndNavigate])
   );
 
-  return showLogin ? <LoginScreen /> : null;
+  return showLanding ? <LandingScreen /> : null;
 }

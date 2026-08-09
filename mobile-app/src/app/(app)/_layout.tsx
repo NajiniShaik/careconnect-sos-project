@@ -21,6 +21,7 @@ import * as Notifications from "expo-notifications";
 export default function AppLayout() {
   const router = useRouter();
   const [userRole, setUserRole] = useState<string | null>(null);
+  const [roleLoaded, setRoleLoaded] = useState(false);
 
   const verifyAuth = useCallback(async () => {
     const token = await getStoredToken();
@@ -48,6 +49,10 @@ export default function AppLayout() {
         if (mounted) {
           setUserRole(null);
         }
+      } finally {
+        if (mounted) {
+          setRoleLoaded(true);
+        }
       }
     })();
 
@@ -56,7 +61,7 @@ export default function AppLayout() {
     };
   }, []);
 
-  const isSecurityDashboardVisible = userRole === "SECURITY" || userRole === "ADMIN";
+  const isSecurityDashboardVisible = roleLoaded && (userRole === "SECURITY" || userRole === "ADMIN");
 
   // initialize notifications when app layout mounts and user is authenticated
   useEffect(() => {
@@ -260,15 +265,25 @@ export default function AppLayout() {
           tabBarIcon: ({ color }) => <AppIcon name="warning-outline" size={18} color={color} />,
         }}
       />
-      {isSecurityDashboardVisible ? (
-        <Tabs.Screen
-          name="security-dashboard"
-          options={{
-            title: "Security",
-            tabBarIcon: ({ color }) => <AppIcon name="shield-outline" size={18} color={color} />,
-          }}
-        />
-      ) : null}
+      <Tabs.Screen
+        name="security-dashboard"
+        options={
+          isSecurityDashboardVisible
+            ? {
+                title: "Security",
+                tabBarIcon: ({ color }) => <AppIcon name="shield-outline" size={18} color={color} />,
+              }
+            : {
+                // hide from tab bar for unauthorized or loading roles
+                // `tabBarButton: () => null` alone can leave an empty slot in some
+                // tab bar layouts. Set `tabBarItemStyle.display = 'none'` so the
+                // tab item does not occupy layout space and remaining tabs
+                // distribute evenly across the full width.
+                tabBarButton: () => null,
+                tabBarItemStyle: { display: "none" },
+              }
+        }
+      />
       <Tabs.Screen
         name="contacts"
         options={{

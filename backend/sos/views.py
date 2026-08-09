@@ -1,6 +1,7 @@
 import logging
 import re
 from typing import List
+from datetime import datetime, date, time, timedelta
 
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
@@ -16,6 +17,7 @@ from django.utils.html import escape
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import status, viewsets
 from django.db.models import Count
+from django.db.models.functions import Lower, Trim
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -43,6 +45,7 @@ from .utils import reverse_geocode_coordinates
 from users.permissions import IsAdmin, IsAdminOrSecurity, IsResident, IsSecurity
 from users.models import GuardianProfile
 from notifications.models import DeviceToken, Notification, NotificationDelivery
+from notifications.services import render_notification_template
 from notifications.tasks import send_push_notification_task, send_email_notification_task, send_sms_notification_task, process_community_broadcast_task
 from notifications.community_broadcast import CommunityBroadcastService
 from society.models import Society
@@ -369,6 +372,149 @@ def _get_user_device_tokens(user):
     return tokens
 
 
+def _get_user_display_name(user):
+    if not user:
+        return ""
+
+    try:
+        full_name = getattr(user, "get_full_name", None)
+        if callable(full_name):
+            name = full_name() or ""
+            if name:
+                return name
+    except Exception:
+        pass
+
+    return getattr(user, "username", "") or ""
+
+
+def _get_sos_notification_context(sos, accepted_by_user=None):
+    resident_name = _get_user_display_name(getattr(sos, "user", None))
+    volunteer_name = _get_user_display_name(accepted_by_user) if accepted_by_user is not None else ""
+    society_name = ""
+    block_name = ""
+    flat_name = ""
+    try:
+        profile = getattr(sos.user, "resident_profile", None)
+        if profile and getattr(profile, "society", None):
+            society_name = profile.society.name or ""
+        if profile and getattr(profile, "block", None):
+            block_name = profile.block.name or ""
+        if profile and getattr(profile, "flat", None):
+            flat_name = getattr(profile.flat, "flat_number", "")
+    except Exception:
+        pass
+
+    return {
+        "incident_id": str(sos.id),
+        "resident_name": resident_name,
+        "volunteer_name": volunteer_name,
+        "category": sos.category or "SOS",
+        "society_name": society_name,
+        "block_name": block_name,
+        "flat_name": flat_name,
+        "timestamp": sos.created_at.isoformat() if getattr(sos, "created_at", None) else "",
+        "address": sos.address or sos.location or "",
+        "message": sos.message or "",
+        "latitude": sos.latitude,
+        "longitude": sos.longitude,
+        "severity": getattr(sos, "priority", "") or "",
+        "resolved_at": sos.updated_at.isoformat() if getattr(sos, "updated_at", None) else "",
+    }
+
+
+def _create_and_dispatch_sos_notification(recipient, rendered, data, email_template_base="notifications/sos_notification", email_context=None):
+    if recipient is None:
+        return None
+
+    try:
+        notification = Notification.objects.create(
+            user=recipient,
+            title=rendered.get("title", "") or "",
+            body=rendered.get("body", "") or "",
+            kind="SOS",
+            data=data or {},
+        )
+    except Exception:
+        logger.exception("Failed to create SOS notification for recipient=%s", getattr(recipient, "id", None))
+        return None
+
+    try:
+        device_tokens = _get_user_device_tokens(recipient)
+        if device_tokens:
+            send_push_notification_task.delay(
+                device_tokens,
+                rendered.get("title", "") or "",
+                rendered.get("body", "") or "",
+                data={"notification_id": notification.id, **({"alert_id": str(data.get("alert_id"))} if data.get("alert_id") else {}), "type": data.get("type", "SOS")},
+            )
+    except Exception:
+        logger.exception("Failed to queue push notification for SOS notification %s", notification.id)
+
+    try:
+        if getattr(recipient, "email", None):
+            email_context = {**(email_context or {}), "notification_id": notification.id}
+            send_email_notification_task.delay(
+                [recipient.email],
+                rendered.get("subject", "") or "",
+                email_template_base,
+                email_context,
+            )
+    except Exception:
+        logger.exception("Failed to queue email notification for SOS notification %s", notification.id)
+
+    return notification
+
+
+def _queue_sos_accepted_notification(sos, recipient, accepted_by_user):
+    if sos is None or recipient is None:
+        return None
+
+    rendered = render_notification_template(
+        "sos_accepted",
+        _get_sos_notification_context(sos, accepted_by_user=accepted_by_user),
+        default_subject=f"SOS Accepted: {sos.id}",
+        default_title="SOS Accepted",
+        default_body=f"SOS accepted by {_get_user_display_name(accepted_by_user)}",
+    )
+
+    return _create_and_dispatch_sos_notification(
+        recipient,
+        rendered,
+        {
+            "type": "SOS_ACCEPTED",
+            "alert_id": str(sos.id),
+            "assigned_to": str(getattr(accepted_by_user, "id", "")),
+            "target": f"/alerts?alert_id={sos.id}",
+        },
+        email_context=_get_sos_notification_context(sos, accepted_by_user=accepted_by_user),
+    )
+
+
+def _queue_sos_resolved_notification(sos):
+    if sos is None or getattr(sos, "user", None) is None:
+        return None
+
+    rendered = render_notification_template(
+        "sos_resolved",
+        _get_sos_notification_context(sos),
+        default_subject=f"SOS Resolved: {sos.id}",
+        default_title="SOS Resolved",
+        default_body=f"SOS resolved for {_get_user_display_name(getattr(sos, 'user', None))}",
+    )
+
+    return _create_and_dispatch_sos_notification(
+        getattr(sos, "user", None),
+        rendered,
+        {
+            "type": "SOS_RESOLVED",
+            "alert_id": str(sos.id),
+            "target": f"/alerts?alert_id={sos.id}",
+        },
+        email_context=_get_sos_notification_context(sos),
+    )
+
+
 def _is_user_available_for_sos_role(user):
     role = str(getattr(user, "role", "") or "").upper()
     if role == "VOLUNTEER":
@@ -562,8 +708,10 @@ class CreateSOSView(APIView):
             admin_qs = _get_society_admin_queryset(User, society_name)
             admin_emails = [u.email for u in admin_qs if getattr(u, "email", None)]
 
-            # SMS recipients: admins/security plus emergency contacts
+            # SMS recipients: admins/security only. Emergency contacts receive a dedicated emergency contact alert.
             sms_numbers = []
+            contact_sms_numbers = []
+            contact_emails = []
             try:
                 sms_numbers.extend(
                     normalized
@@ -583,11 +731,12 @@ class CreateSOSView(APIView):
                     for ec in getattr(profile, "emergency_contacts", []).all():
                         normalized_number = _normalize_phone_number(getattr(ec, "phone", None))
                         if normalized_number:
-                            sms_numbers.append(normalized_number)
+                            contact_sms_numbers.append(normalized_number)
             except Exception:
                 pass
 
             sms_numbers = [num for num in set(sms_numbers) if num]
+            contact_sms_numbers = [num for num in set(contact_sms_numbers) if num]
 
             # Fire off notifications (best-effort) via Celery. Failures should not break SOS creation.
             try:
@@ -601,13 +750,49 @@ class CreateSOSView(APIView):
                     seen_recipient_ids.add(recipient_id)
                     recipients_to_notify.append(recipient)
                 logger.info("[SOS] routing recipients=%s resident=%s society=%s", [getattr(user, "username", "") for user in recipients_to_notify], getattr(request.user, "username", ""), society_name)
-                notification_body = f"{resident_name} has triggered an SOS."
+
+                block_name = ""
+                flat_name = ""
+                try:
+                    profile = getattr(request.user, "resident_profile", None)
+                    if profile and getattr(profile, "block", None):
+                        block_name = profile.block.name or ""
+                    if profile and getattr(profile, "flat", None):
+                        flat_name = getattr(profile.flat, "flat_number", "")
+                except Exception:
+                    block_name = ""
+                    flat_name = ""
+
+                template_context = {
+                    "incident_id": str(sos.id),
+                    "resident_name": resident_name,
+                    "category": sos.category or "SOS",
+                    "society_name": society_name or "",
+                    "block_name": block_name or "",
+                    "flat_name": flat_name or "",
+                    "timestamp": context["timestamp"],
+                    "address": location or "",
+                    "message": sos.message or "",
+                    "latitude": sos.latitude,
+                    "longitude": sos.longitude,
+                    "severity": getattr(sos, "priority", "") or "",
+                }
+                rendered = render_notification_template(
+                    "sos_created",
+                    template_context,
+                    default_subject=f"SOS Alert: {sos.category or 'SOS'}",
+                    default_title="Emergency SOS Alert",
+                    default_body=f"{resident_name} has triggered an SOS.",
+                )
+                notification_body = rendered["body"]
+                notification_title = rendered["title"]
+                email_subject = rendered["subject"]
                 created_notifications = []
                 created_notification_ids = []
                 for recipient in recipients_to_notify:
                     notification = Notification.objects.create(
                         user=recipient,
-                        title="Emergency SOS Alert",
+                        title=notification_title,
                         body=notification_body,
                         kind="SOS",
                         data={
@@ -624,25 +809,14 @@ class CreateSOSView(APIView):
 
                 if sms_numbers:
                     logger.info("[SOS] channels=SMS recipients=%s", sms_numbers)
-                    block_name = ""
-                    flat_name = ""
-                    try:
-                        profile = getattr(request.user, "resident_profile", None)
-                        if profile and getattr(profile, "block", None):
-                            block_name = profile.block.name or ""
-                        if profile and getattr(profile, "flat", None):
-                            flat_name = getattr(profile.flat, "flat_number", "")
-                    except Exception:
-                        block_name = ""
-                        flat_name = ""
 
                     coords = ""
                     if sos.latitude is not None and sos.longitude is not None:
                         coords = f" https://www.google.com/maps/search/?api=1&query={sos.latitude},{sos.longitude}"
 
-                    sms_message = (
+                    sms_message = notification_body or (
                         f"Emergency SOS Alert. Resident: {resident_name}. Society: {society_name or 'N/A'}. "
-                        f"Block: {block_name or 'N/A'}. Flat: {flat_name or 'N/A'}. "
+                        f"Block: {template_context['block_name'] or 'N/A'}. Flat: {template_context['flat_name'] or 'N/A'}. "
                         f"Emergency Type: {sos.category or 'SOS'}. Time: {context['timestamp']}."
                     )
                     if coords:
@@ -659,12 +833,41 @@ class CreateSOSView(APIView):
                     logger.info("QUEUE EMAIL")
                     send_email_notification_task.delay(
                         email_recipients,
-                        "SOS Alert: %s" % (sos.category or "SOS"),
+                        email_subject,
                         "notifications/sos_notification",
                         {**context, "notification_id": primary_notification_id},
                     )
                 else:
                     logger.warning("No email recipients available for SOS alert; skipping admin email task")
+
+                if contact_sms_numbers or contact_emails:
+                    emergency_contact_rendered = render_notification_template(
+                        "emergency_contact_alert",
+                        template_context,
+                        default_subject="Emergency SOS Alert",
+                        default_title="Emergency Contact Alert",
+                        default_body=f"Please verify emergency contact for {resident_name}",
+                    )
+                    if contact_sms_numbers:
+                        logger.info("[SOS] channels=SMS emergency contacts recipients=%s", contact_sms_numbers)
+                        send_sms_notification_task.delay(contact_sms_numbers, emergency_contact_rendered["body"])
+                    if contact_emails:
+                        logger.info("[SOS] channels=Email emergency contacts recipients=%s", contact_emails)
+                        for notification_id in created_notification_ids:
+                            send_email_notification_task.delay(
+                                contact_emails,
+                                emergency_contact_rendered["subject"],
+                                "notifications/emergency_contact_notification",
+                                {
+                                    **context,
+                                    "block_name": template_context["block_name"],
+                                    "flat_name": template_context["flat_name"],
+                                    "latitude": sos.latitude,
+                                    "longitude": sos.longitude,
+                                    "contact_name": "Emergency Contact",
+                                    "notification_id": notification_id,
+                                },
+                            )
 
                 for recipient, notification in created_notifications:
                     device_tokens = _get_user_device_tokens(recipient)
@@ -684,14 +887,14 @@ class CreateSOSView(APIView):
                         getattr(recipient, "username", ""),
                         getattr(recipient, "role", ""),
                         device_tokens,
-                        "Emergency SOS Alert",
-                        f"{resident_name} has triggered an SOS.",
+                        notification_title,
+                        notification_body,
                         push_data,
                     )
                     send_push_notification_task.delay(
                         device_tokens,
-                        "Emergency SOS Alert",
-                        f"{resident_name} has triggered an SOS.",
+                        notification_title,
+                        notification_body,
                         data=push_data,
                     )
 
@@ -715,13 +918,28 @@ class CreateSOSView(APIView):
 
                 if contact_emails:
                     try:
+                        emergency_contact_rendered = render_notification_template(
+                            "emergency_contact_alert",
+                            template_context,
+                            default_subject="Emergency SOS Alert",
+                            default_title="Emergency Contact Alert",
+                            default_body=f"Please verify emergency contact for {resident_name}",
+                        )
                         logger.info("Queued Email notification task")
                         for notification_id in created_notification_ids:
                             send_email_notification_task.delay(
                                 contact_emails,
-                                "Emergency SOS Alert",
+                                emergency_contact_rendered["subject"],
                                 "notifications/emergency_contact_notification",
-                                {**context, "contact_name": "Emergency Contact", "notification_id": notification_id},
+                                {
+                                    **context,
+                                    "block_name": template_context["block_name"],
+                                    "flat_name": template_context["flat_name"],
+                                    "latitude": sos.latitude,
+                                    "longitude": sos.longitude,
+                                    "contact_name": "Emergency Contact",
+                                    "notification_id": notification_id,
+                                },
                             )
                     except Exception:
                         logger.exception("Failed to queue SOS emails to emergency contacts")
@@ -1450,6 +1668,10 @@ class SOSAlertManagementView(APIView):
                         updated_sos.record_status_event("SECURITY_RESPONDED", details="Security responded")
                     elif normalized_status == "RESOLVED":
                         updated_sos.record_status_event("SECURITY_RESPONDED", details="Incident marked resolved")
+                        try:
+                            _queue_sos_resolved_notification(updated_sos)
+                        except Exception:
+                            logger.exception("Failed to queue sos_resolved notification for SOS %s", getattr(updated_sos, "id", None))
                 return Response(SOSSerializer(updated_sos, context={"request": request}).data, status=status.HTTP_200_OK)
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         if request.user.role in ["VOLUNTEER", "SECURITY"]:
@@ -1492,6 +1714,12 @@ class SOSAlertManagementView(APIView):
                             locked_sos.status = "ACTIVE"
                             locked_sos.save(update_fields=["assigned_volunteer", "status", "updated_at"])
                             locked_sos.record_status_event("SECURITY_RESPONDED", details="Security responded to the incident")
+
+                        try:
+                            _queue_sos_accepted_notification(locked_sos, getattr(locked_sos, "user", None), request.user)
+                        except Exception:
+                            logger.exception("Failed to queue sos_accepted notification for SOS %s", getattr(locked_sos, "id", None))
+
                         return Response(SOSSerializer(locked_sos, context={"request": request}).data, status=status.HTTP_200_OK)
                 except SOS.DoesNotExist:
                     return Response(status=status.HTTP_404_NOT_FOUND)
@@ -1562,23 +1790,40 @@ class SOSAlertManagementView(APIView):
 def _get_admin_reporting_queryset(request):
     qs = SOS.objects.all().select_related("user")
 
+    # Date filtering: parse YYYY-MM-DD and use timezone-aware inclusive start and exclusive end
     date_from = request.query_params.get("start_date") or request.query_params.get("date_from")
     date_to = request.query_params.get("end_date") or request.query_params.get("date_to")
     if date_from:
-        qs = qs.filter(created_at__date__gte=date_from)
+        try:
+            parsed = datetime.strptime(date_from, "%Y-%m-%d").date()
+            start_dt = timezone.make_aware(datetime.combine(parsed, time.min), timezone.get_default_timezone())
+            qs = qs.filter(created_at__gte=start_dt)
+        except Exception:
+            # fallback to previous behavior if parsing fails
+            qs = qs.filter(created_at__date__gte=date_from)
     if date_to:
-        qs = qs.filter(created_at__date__lte=date_to)
+        try:
+            parsed_to = datetime.strptime(date_to, "%Y-%m-%d").date()
+            # exclusive upper bound: next day at midnight
+            next_day = parsed_to + timedelta(days=1)
+            end_exclusive = timezone.make_aware(datetime.combine(next_day, time.min), timezone.get_default_timezone())
+            qs = qs.filter(created_at__lt=end_exclusive)
+        except Exception:
+            qs = qs.filter(created_at__date__lte=date_to)
 
     society = request.query_params.get("society")
     if society:
         if str(society).isdigit():
             qs = qs.filter(user__resident_profile__society__id=int(society))
         else:
-            qs = qs.filter(user__resident_profile__society__name__icontains=society)
+            # name matching: prefer exact case-insensitive match to avoid broad substrings
+            qs = qs.filter(user__resident_profile__society__name__iexact=society)
 
+    # Category filtering: treat provided category as an exact case-insensitive selection
     category = request.query_params.get("category") or request.query_params.get("incident_type")
     if category:
-        qs = qs.filter(category__icontains=category)
+        # use iexact to avoid substring matches; this matches case-insensitively
+        qs = qs.filter(category__iexact=category)
 
     return qs
 
@@ -1589,8 +1834,9 @@ def _build_admin_report_payload(qs):
     escalated_incidents = 0
     resolved_incidents = 0
 
-    category_counts_qs = qs.values("category").annotate(count=Count("id"))
-    category_counts = {c["category"] or "": c["count"] for c in category_counts_qs}
+    # Normalize category keys (trim + lower) for consistent grouping
+    category_counts_qs = qs.annotate(cat_norm=Trim(Lower("category"))).values("cat_norm").annotate(count=Count("id"))
+    category_counts = { (c["cat_norm"] or ""): c["count"] for c in category_counts_qs}
 
     society_counts = {}
     guardian_times = []

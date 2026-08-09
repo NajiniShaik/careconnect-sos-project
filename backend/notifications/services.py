@@ -14,12 +14,65 @@ from typing import Any, Dict, Iterable, List, Optional
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.mail import EmailMultiAlternatives, get_connection
+from django.template import Context, Template
 from django.template.loader import render_to_string
 from django.db import OperationalError
 from django.apps import apps
 from notifications.firebase import send_push_notification as send_fcm_push_notification
 
 logger = logging.getLogger(__name__)
+
+def _render_template_string(template_string, context=None):
+    if template_string is None:
+        return ""
+
+    context = context or {}
+    try:
+        template = Template(str(template_string))
+        rendered = template.render(Context(context))
+        return rendered if isinstance(rendered, str) else str(rendered)
+    except Exception as exc:
+        logger.warning("Failed to render notification template string: %s", exc)
+        return str(template_string)
+
+
+def get_notification_template(template_key):
+    if not template_key:
+        return None
+
+    try:
+        return apps.get_model("notifications", "NotificationTemplate").objects.filter(template_key=template_key, is_active=True).first()
+    except Exception as exc:
+        logger.warning("Unable to load NotificationTemplate %s: %s", template_key, exc)
+        return None
+
+
+def render_notification_template(template_key, context=None, default_subject="", default_title="", default_body=""):
+    template = get_notification_template(template_key)
+    if template is None:
+        return {
+            "subject": default_subject or "",
+            "title": default_title or "",
+            "body": default_body or "",
+        }
+
+    subject = _render_template_string(template.subject or default_subject or "", context)
+    title = _render_template_string(template.title or default_title or "", context)
+    body = _render_template_string(template.body or default_body or "", context)
+    return {
+        "subject": subject,
+        "title": title,
+        "body": body,
+    }
+
+
+def get_notification_template_subject(template_key, context=None, default_subject=""):
+    return render_notification_template(template_key, context=context, default_subject=default_subject)["subject"]
+
+
+def get_notification_template_title_body(template_key, context=None, default_title="", default_body=""):
+    rendered = render_notification_template(template_key, context=context, default_title=default_title, default_body=default_body)
+    return rendered["title"], rendered["body"]
 
 
 def _mask_token(token):

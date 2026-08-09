@@ -10,6 +10,7 @@ from django.utils import timezone
 from django.conf import settings
 
 from .models import CommunityBroadcastLog, Notification
+from .services import render_notification_template
 from sos.models import SOS
 from .radius_service import IncidentVisibilityRadiusService
 
@@ -154,7 +155,7 @@ class CommunityBroadcastService:
                 summary["residents"] += 1
         return summary
 
-    def _create_notification(self, sos, recipient, role):
+    def _create_notification(self, sos, recipient, role, title, body):
         alert_id = str(sos.id)
         duplicate_exists = Notification.objects.filter(user=recipient, kind="SOS").filter(
             Q(data__alert_id=alert_id) | Q(data__alertId=alert_id) | Q(data__alertid=alert_id)
@@ -162,8 +163,6 @@ class CommunityBroadcastService:
         if duplicate_exists:
             return None
 
-        title = "Community Broadcast"
-        body = f"A community broadcast has been sent for SOS {sos.id}."
         notification = Notification.objects.create(
             user=recipient,
             title=title,
@@ -189,7 +188,7 @@ class CommunityBroadcastService:
             recipient_contact=recipient_contact,
         )
 
-    def _enqueue_for_recipient(self, sos, recipient, role, notification):
+    def _enqueue_for_recipient(self, sos, recipient, role, notification, rendered):
         from . import tasks as notification_tasks
 
         phone_number = getattr(recipient, "phone", None) or ""
@@ -204,14 +203,30 @@ class CommunityBroadcastService:
 
         notification_tasks.send_push_notification_task.delay(
             device_tokens,
-            "Community Broadcast",
-            f"SOS {sos.id} requires nearby community support.",
+            rendered["title"],
+            rendered["body"],
             data={"notification_id": notification.id, "alert_id": str(sos.id)},
         )
         if phone_number:
-            notification_tasks.send_sms_notification_task.delay([phone_number], f"Community broadcast for SOS {sos.id}.", notification_id=notification.id)
+            notification_tasks.send_sms_notification_task.delay([phone_number], rendered["body"], notification_id=notification.id)
         if email:
-            notification_tasks.send_email_notification_task.delay([email], "Community Broadcast", "notifications/sos_notification", {"notification_id": notification.id, "resident_name": sos.user.username if sos.user else "Resident"})
+            notification_tasks.send_email_notification_task.delay(
+                [email],
+                rendered["subject"],
+                "notifications/sos_notification",
+                {
+                    "notification_id": notification.id,
+                    "resident_name": sos.user.username if sos.user else "Resident",
+                    "society_name": getattr(getattr(sos.user, "resident_profile", None), "society", None) and getattr(sos.user.resident_profile.society, "name", "") or "",
+                    "category": sos.category or "SOS",
+                    "severity": sos.priority,
+                    "address": sos.address or sos.location or "",
+                    "timestamp": sos.created_at.isoformat() if getattr(sos, "created_at", None) else "",
+                    "message": sos.message or "",
+                    "latitude": sos.latitude,
+                    "longitude": sos.longitude,
+                },
+            )
 
     @transaction.atomic
     def broadcast(self, sos_id, include_residents=False, broadcast_radius_meters=None):
@@ -231,14 +246,33 @@ class CommunityBroadcastService:
                 "broadcast_started": True,
             }
 
+        rendered = render_notification_template(
+            "community_broadcast",
+            {
+                "incident_id": str(sos.id),
+                "resident_name": getattr(sos.user, "username", "Resident"),
+                "category": sos.category or "SOS",
+                "society_name": getattr(getattr(sos.user, "resident_profile", None), "society", None) and getattr(sos.user.resident_profile.society, "name", "") or "",
+                "address": sos.address or sos.location or "",
+                "timestamp": sos.created_at.isoformat() if getattr(sos, "created_at", None) else "",
+                "latitude": sos.latitude,
+                "longitude": sos.longitude,
+                "message": sos.message or "",
+                "severity": getattr(sos, "priority", "") or "",
+            },
+            default_subject="Community Broadcast",
+            default_title="Community Broadcast",
+            default_body=f"Community broadcast: SOS {sos.id}",
+        )
+
         for recipient in recipients:
             role = str(getattr(recipient, "role", "") or "").upper()
             if CommunityBroadcastLog.objects.filter(sos=sos, recipient=recipient, role=role).exists():
                 continue
-            notification = self._create_notification(sos, recipient, role)
+            notification = self._create_notification(sos, recipient, role, rendered["title"], rendered["body"])
             if notification is None:
                 continue
-            self._enqueue_for_recipient(sos, recipient, role, notification)
+            self._enqueue_for_recipient(sos, recipient, role, notification, rendered)
 
         return {
             "total_recipients": len(recipients),

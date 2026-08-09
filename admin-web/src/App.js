@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from "react-router-dom";
 
 import Login from "./pages/Login";
 import Register from "./pages/Register";
+import LandingPage from "./pages/LandingPage";
 import Dashboard from "./pages/Dashboard";
 import ReportingDashboard from "./pages/ReportingDashboard";
 import ProtectedRoute from "./routes/ProtectedRoute";
@@ -22,6 +23,13 @@ function App() {
     <Routes>
       <Route
         path="/"
+        element={
+          token ? <Navigate to="/dashboard" replace /> : <LandingPage />
+        }
+      />
+
+      <Route
+        path="/login"
         element={
           token ? <Navigate to="/dashboard" replace /> : <Login />
         }

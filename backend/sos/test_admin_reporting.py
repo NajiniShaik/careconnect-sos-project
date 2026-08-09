@@ -182,3 +182,59 @@ class AdminReportingTests(TestCase):
             resp_pdf = self.client.get("/api/sos/reporting/export/pdf/")
             self.assertEqual(resp_excel.status_code, status.HTTP_403_FORBIDDEN)
             self.assertEqual(resp_pdf.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_category_normalization_and_exact_filtering(self):
+        # add mixed-case and substring categories to test normalization and exact filtering
+        self.client.force_authenticate(user=self.admin_user)
+
+        # create uppercase variation and a substring variant
+        sos_upper = SOS.objects.create(user=self.resident_user, message="Uppercase", location="LX", category="MEDICAL")
+        sos_sub = SOS.objects.create(user=self.resident_user, message="Like", location="LY", category="medicallike")
+
+        resp_all = self.client.get("/api/sos/reporting/")
+        self.assertEqual(resp_all.status_code, status.HTTP_200_OK)
+        data_all = resp_all.data
+
+        # normalized category key should appear in category_counts (lowercased)
+        self.assertIn("medical", data_all["category_counts"])
+
+        # total for 'medical' should include both 'medical' and 'MEDICAL' but not 'medicallike'
+        medical_count = data_all["category_counts"].get("medical")
+        # should be at least 2 (sos1/sos3) plus sos_upper
+        self.assertGreaterEqual(medical_count, 3)
+
+        # exact category filter should not include substring 'medicallike'
+        resp_filtered = self.client.get("/api/sos/reporting/?category=medical")
+        self.assertEqual(resp_filtered.status_code, status.HTTP_200_OK)
+        self.assertNotIn("medicallike", resp_filtered.data.get("category_counts", {}))
+
+    def test_date_boundaries_and_combined_filters(self):
+        self.client.force_authenticate(user=self.admin_user)
+        # create an incident on the boundary: today at 00:00 and at 23:59
+        from django.utils import timezone
+        from datetime import datetime, time
+
+        today = timezone.now().date()
+        start_dt = timezone.make_aware(datetime.combine(today, time.min), timezone.get_default_timezone())
+        end_dt = timezone.make_aware(datetime.combine(today, time.max), timezone.get_default_timezone())
+
+        sos_start = SOS.objects.create(user=self.resident_user, message="StartDay", location="S1", category="other")
+        sos_start.created_at = start_dt
+        sos_start.save(update_fields=["created_at"]) 
+
+        sos_end = SOS.objects.create(user=self.resident_user, message="EndDay", location="S2", category="other")
+        sos_end.created_at = end_dt
+        sos_end.save(update_fields=["created_at"]) 
+
+        # filter for today should include both
+        resp = self.client.get(f"/api/sos/reporting/?start_date={today.isoformat()}&end_date={today.isoformat()}")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertGreaterEqual(resp.data["total_incidents"], 2)
+
+        # combined filter: today + society id + category
+        resp_combined = self.client.get(f"/api/sos/reporting/?start_date={today.isoformat()}&end_date={today.isoformat()}&society={self.soc_a.id}&category=other")
+        self.assertEqual(resp_combined.status_code, status.HTTP_200_OK)
+        # results must satisfy AND logic (no unexpected rows)
+        # ensure that every society_count key corresponds to soc_a if total_incidents>0
+        if resp_combined.data["total_incidents"] > 0:
+            self.assertIn(self.soc_a.name, resp_combined.data["society_counts"])

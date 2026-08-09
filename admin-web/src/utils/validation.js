@@ -59,6 +59,10 @@ export function validateGuardian(formData) {
 }
 
 export function validateVolunteer(formData) {
+  if (!formData.society) {
+    return "Please select a society";
+  }
+
   if (!formData.skills.trim()) {
     return "Skills are required";
   }
@@ -71,6 +75,10 @@ export function validateVolunteer(formData) {
 }
 
 export function validateSecurity(formData) {
+  if (!formData.society) {
+    return "Please select a society";
+  }
+
   if (!formData.employee_id.trim()) {
     return "Employee ID is required";
   }

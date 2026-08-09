@@ -84,8 +84,18 @@ export async function saveTemplate(template) {
   const key = String(template.template_key || template.key || template.templateKey || "").trim();
   const url = `${API}/templates/${encodeURIComponent(key)}/`;
   const payload = buildSavePayload(template);
-  const res = await axios.put(url, payload, { headers: getAuthHeaders() });
-  return mapBackendTemplate(res.data);
+  try {
+    const res = await axios.put(url, payload, { headers: getAuthHeaders() });
+    return mapBackendTemplate(res.data);
+  } catch (err) {
+    // If the template doesn't exist, backend returns 404 for PUT. Try creating via POST.
+    if (err?.response?.status === 404) {
+      const listUrl = `${API}/templates/`;
+      const res2 = await axios.post(listUrl, payload, { headers: getAuthHeaders() });
+      return mapBackendTemplate(res2.data);
+    }
+    throw err;
+  }
 }
 
 export async function getTemplate(key) {

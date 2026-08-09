@@ -1,0 +1,502 @@
+src/app/(app)/_layout.tsx(19,32): error TS7016: Could not find a declaration file for module 'expo-notifications'. 'D:/careconnect/mobile-app/node_modules/expo-notifications/build/index.js' implicitly has an 'any' type.
+  Try `npm i --save-dev @types/expo-notifications` if it exists or add a new declaration (.d.ts) file containing `declare module 'expo-notifications';`
+src/app/(app)/_layout.tsx(130,29): error TS2345: Argument of type 'string' is not assignable to parameter of type '"/" | RelativePathString | ExternalPathString | "/contact-directory" | `/contact-directory?${string}` | `/contact-directory#${string}` | "/explore" | `/explore?${string}` | `/explore#${string}` | "/incident-updates" | ... 117 more ... | { ...; }'.
+src/app/(app)/_layout.tsx(154,66): error TS7006: Parameter 'token' implicitly has an 'any' type.
+src/app/(app)/_layout.tsx(253,77): error TS2322: Type 'ColorValue' is not assignable to type 'string | undefined'.
+  Type 'OpaqueColorValue' is not assignable to type 'string | undefined'.
+src/app/(app)/_layout.tsx(260,80): error TS2322: Type 'ColorValue' is not assignable to type 'string | undefined'.
+  Type 'OpaqueColorValue' is not assignable to type 'string | undefined'.
+src/app/(app)/_layout.tsx(268,81): error TS2322: Type 'ColorValue' is not assignable to type 'string | undefined'.
+  Type 'OpaqueColorValue' is not assignable to type 'string | undefined'.
+src/app/(app)/_layout.tsx(276,79): error TS2322: Type 'ColorValue' is not assignable to type 'string | undefined'.
+  Type 'OpaqueColorValue' is not assignable to type 'string | undefined'.
+src/app/(app)/_layout.tsx(283,77): error TS2322: Type 'ColorValue' is not assignable to type 'string | undefined'.
+  Type 'OpaqueColorValue' is not assignable to type 'string | undefined'.
+src/app/(app)/_layout.tsx(290,81): error TS2322: Type 'ColorValue' is not assignable to type 'string | undefined'.
+  Type 'OpaqueColorValue' is not assignable to type 'string | undefined'.
+src/app/(app)/alerts.tsx(9,275): error TS2305: Module '"../../services/sosService"' has no exported member 'retrySosTranscription'.
+src/app/(app)/alerts.tsx(11,33): error TS7006: Parameter 'value' implicitly has an 'any' type.
+src/app/(app)/alerts.tsx(15,32): error TS7006: Parameter 'alert' implicitly has an 'any' type.
+src/app/(app)/alerts.tsx(24,41): error TS2339: Property 'username' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(25,35): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(26,31): error TS2339: Property 'userDetails' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(27,85): error TS2339: Property 'user' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(35,12): error TS2339: Property 'assigned_volunteer' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(36,12): error TS2339: Property 'assignedVolunteer' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(37,12): error TS2339: Property 'assigned_volunteer_id' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(38,12): error TS2339: Property 'assignedVolunteerId' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(39,12): error TS2339: Property 'assigned_volunteer_name' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(40,12): error TS2339: Property 'assignedVolunteerName' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(64,31): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(65,37): error TS2339: Property 'username' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(65,55): error TS2339: Property 'name' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(66,34): error TS2339: Property 'email' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(76,33): error TS7006: Parameter 'category' implicitly has an 'any' type.
+src/app/(app)/alerts.tsx(83,71): error TS2339: Property 'value' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(85,14): error TS2339: Property 'label' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(86,18): error TS2339: Property 'label' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(94,11): error TS2339: Property 'residentPhone' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(95,11): error TS2339: Property 'userDetails' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(96,11): error TS2339: Property 'userDetails' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(97,11): error TS2339: Property 'userDetails' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(98,11): error TS2339: Property 'userDetails' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(104,23): error TS2339: Property 'user' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(128,28): error TS2339: Property 'assigned_volunteer_id' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(128,59): error TS2339: Property 'assigned_volunteer' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(129,30): error TS2339: Property 'assigned_volunteer_name' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(129,71): error TS2339: Property 'assigned_volunteer' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(129,111): error TS2339: Property 'assigned_volunteer' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(131,34): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(131,52): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(148,13): error TS2339: Property 'society' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(148,39): error TS2339: Property 'society' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(149,13): error TS2339: Property 'blockFlat' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(149,41): error TS2339: Property 'blockFlat' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(150,13): error TS2339: Property 'address' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(150,39): error TS2339: Property 'address' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(152,28): error TS2339: Property 'location' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(155,24): error TS7006: Parameter 'status' implicitly has an 'any' type.
+src/app/(app)/alerts.tsx(174,32): error TS2339: Property 'status' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(175,39): error TS2339: Property 'current_status' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(180,26): error TS7006: Parameter 'value' implicitly has an 'any' type.
+src/app/(app)/alerts.tsx(195,37): error TS2339: Property 'created_at' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(196,39): error TS2339: Property 'created_at' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(208,11): error TS2339: Property 'id' does not exist on type 'object'.
+src/app/(app)/alerts.tsx(209,11): error TS2339: Property 'pk' does not exist on type 'object'.
+src/app/(app)/alerts.tsx(210,11): error TS2339: Property 'alert_id' does not exist on type 'object'.
+src/app/(app)/alerts.tsx(211,11): error TS2339: Property 'alertId' does not exist on type 'object'.
+src/app/(app)/alerts.tsx(212,11): error TS2339: Property 'alertid' does not exist on type 'object'.
+src/app/(app)/alerts.tsx(281,17): error TS2345: Argument of type '{ id: any; alertId: any; status: any; current_status: any; message: any; location: any; address: any; city: any; state: any; country: any; latitude: number | null; longitude: number | null; sosType: any; ... 12 more ...; assigned_volunteer_name: any; }[]' is not assignable to parameter of type 'SetStateAction<never[]>'.
+  Type '{ id: any; alertId: any; status: any; current_status: any; message: any; location: any; address: any; city: any; state: any; country: any; latitude: number | null; longitude: number | null; sosType: any; ... 12 more ...; assigned_volunteer_name: any; }[]' is not assignable to type 'never[]'.
+    Type '{ id: any; alertId: any; status: any; current_status: any; message: any; location: any; address: any; city: any; state: any; country: any; latitude: number | null; longitude: number | null; sosType: any; ... 12 more ...; assigned_volunteer_name: any; }' is not assignable to type 'never'.
+src/app/(app)/alerts.tsx(313,73): error TS2339: Property 'value' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(314,19): error TS2339: Property 'label' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(317,29): error TS2339: Property 'role' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(341,26): error TS2345: Argument of type 'string' is not assignable to parameter of type 'SetStateAction<null>'.
+src/app/(app)/alerts.tsx(345,54): error TS7006: Parameter 'alertId' implicitly has an 'any' type.
+src/app/(app)/alerts.tsx(357,17): error TS2345: Argument of type '(prev: never[]) => { id: any; alertId: any; status: any; current_status: any; message: any; location: any; address: any; city: any; state: any; country: any; latitude: number | null; longitude: number | null; ... 13 more ...; assigned_volunteer_name: any; }[]' is not assignable to parameter of type 'SetStateAction<never[]>'.
+  Type '(prev: never[]) => { id: any; alertId: any; status: any; current_status: any; message: any; location: any; address: any; city: any; state: any; country: any; latitude: number | null; longitude: number | null; ... 13 more ...; assigned_volunteer_name: any; }[]' is not assignable to type '(prevState: never[]) => never[]'.
+    Type '{ id: any; alertId: any; status: any; current_status: any; message: any; location: any; address: any; city: any; state: any; country: any; latitude: number | null; longitude: number | null; sosType: any; ... 12 more ...; assigned_volunteer_name: any; }[]' is not assignable to type 'never[]'.
+      Type '{ id: any; alertId: any; status: any; current_status: any; message: any; location: any; address: any; city: any; state: any; country: any; latitude: number | null; longitude: number | null; sosType: any; ... 12 more ...; assigned_volunteer_name: any; }' is not assignable to type 'never'.
+src/app/(app)/alerts.tsx(374,37): error TS7006: Parameter 'alert' implicitly has an 'any' type.
+src/app/(app)/alerts.tsx(395,24): error TS2339: Property 'response' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(396,22): error TS2339: Property 'response' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(397,25): error TS2339: Property 'message' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(406,38): error TS7006: Parameter 'alert' implicitly has an 'any' type.
+src/app/(app)/alerts.tsx(416,29): error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type '{}'.
+src/app/(app)/alerts.tsx(417,34): error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type '{}'.
+src/app/(app)/alerts.tsx(418,29): error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type '{}'.
+src/app/(app)/alerts.tsx(419,34): error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type '{}'.
+src/app/(app)/alerts.tsx(437,19): error TS2345: Argument of type '(prev: never[]) => any[]' is not assignable to parameter of type 'SetStateAction<never[]>'.
+  Type '(prev: never[]) => any[]' is not assignable to type '(prevState: never[]) => never[]'.
+    Type 'any[]' is not assignable to type 'never[]'.
+      Type 'any' is not assignable to type 'never'.
+src/app/(app)/alerts.tsx(437,61): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(437,90): error TS2698: Spread types may only be created from object types.
+src/app/(app)/alerts.tsx(445,24): error TS2339: Property 'response' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(446,22): error TS2339: Property 'response' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(447,25): error TS2339: Property 'message' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(456,36): error TS7006: Parameter 'alert' implicitly has an 'any' type.
+src/app/(app)/alerts.tsx(472,61): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(479,24): error TS2339: Property 'response' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(480,22): error TS2339: Property 'response' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(481,25): error TS2339: Property 'message' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(490,44): error TS7006: Parameter 'alert' implicitly has an 'any' type.
+src/app/(app)/alerts.tsx(506,61): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(513,24): error TS2339: Property 'response' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(514,22): error TS2339: Property 'response' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(515,25): error TS2339: Property 'message' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(540,35): error TS2339: Property 'assigned_volunteer_id' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(540,69): error TS2339: Property 'assigned_volunteer' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(541,24): error TS2339: Property 'status' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(542,32): error TS2339: Property 'current_status' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(543,46): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(544,31): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{}'.
+  No index signature with a parameter of type 'string' was found on type '{}'.
+src/app/(app)/alerts.tsx(545,36): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{}'.
+  No index signature with a parameter of type 'string' was found on type '{}'.
+src/app/(app)/alerts.tsx(545,72): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{}'.
+  No index signature with a parameter of type 'string' was found on type '{}'.
+src/app/(app)/alerts.tsx(555,48): error TS7006: Parameter 'alertId' implicitly has an 'any' type.
+src/app/(app)/alerts.tsx(575,56): error TS7006: Parameter 'alert' implicitly has an 'any' type.
+src/app/(app)/alerts.tsx(588,28): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{}'.
+  No index signature with a parameter of type 'string' was found on type '{}'.
+src/app/(app)/alerts.tsx(589,36): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{}'.
+  No index signature with a parameter of type 'string' was found on type '{}'.
+src/app/(app)/alerts.tsx(589,64): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{}'.
+  No index signature with a parameter of type 'string' was found on type '{}'.
+src/app/(app)/alerts.tsx(601,24): error TS2345: Argument of type 'string' is not assignable to parameter of type 'SetStateAction<null>'.
+src/app/(app)/alerts.tsx(602,10): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{}'.
+  No index signature with a parameter of type 'string' was found on type '{}'.
+src/app/(app)/alerts.tsx(617,105): error TS2339: Property 'length' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(626,42): error TS7006: Parameter 'sosId' implicitly has an 'any' type.
+src/app/(app)/alerts.tsx(626,49): error TS7006: Parameter 'update' implicitly has an 'any' type.
+src/app/(app)/alerts.tsx(628,23): error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type '{}'.
+src/app/(app)/alerts.tsx(629,26): error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type '{}'.
+src/app/(app)/alerts.tsx(640,48): error TS7006: Parameter 'alert' implicitly has an 'any' type.
+src/app/(app)/alerts.tsx(646,33): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{}'.
+  No index signature with a parameter of type 'string' was found on type '{}'.
+src/app/(app)/alerts.tsx(664,39): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{}'.
+  No index signature with a parameter of type 'string' was found on type '{}'.
+src/app/(app)/alerts.tsx(677,13): error TS7034: Variable 'updateItems' implicitly has type 'any[]' in some locations where its type cannot be determined.
+src/app/(app)/alerts.tsx(694,47): error TS7005: Variable 'updateItems' implicitly has an 'any[]' type.
+src/app/(app)/alerts.tsx(709,51): error TS7006: Parameter 'alert' implicitly has an 'any' type.
+src/app/(app)/alerts.tsx(720,28): error TS2345: Argument of type 'string' is not assignable to parameter of type 'SetStateAction<null>'.
+src/app/(app)/alerts.tsx(733,29): error TS2339: Property 'response' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(733,62): error TS2339: Property 'response' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(740,52): error TS7006: Parameter 'alert' implicitly has an 'any' type.
+src/app/(app)/alerts.tsx(747,9): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{}'.
+  No index signature with a parameter of type 'string' was found on type '{}'.
+src/app/(app)/alerts.tsx(777,28): error TS2339: Property 'response' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(777,61): error TS2339: Property 'response' does not exist on type '{}'.
+src/app/(app)/alerts.tsx(784,52): error TS7006: Parameter 'alert' implicitly has an 'any' type.
+src/app/(app)/alerts.tsx(797,48): error TS7006: Parameter 'alert' implicitly has an 'any' type.
+src/app/(app)/alerts.tsx(807,50): error TS7006: Parameter 'alert' implicitly has an 'any' type.
+src/app/(app)/alerts.tsx(817,52): error TS7006: Parameter 'alert' implicitly has an 'any' type.
+src/app/(app)/alerts.tsx(849,55): error TS7006: Parameter 'alert' implicitly has an 'any' type.
+src/app/(app)/alerts.tsx(861,78): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{}'.
+  No index signature with a parameter of type 'string' was found on type '{}'.
+src/app/(app)/alerts.tsx(882,50): error TS7006: Parameter 'audioUrl' implicitly has an 'any' type.
+src/app/(app)/alerts.tsx(909,51): error TS7006: Parameter 'alert' implicitly has an 'any' type.
+src/app/(app)/alerts.tsx(915,33): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{}'.
+  No index signature with a parameter of type 'string' was found on type '{}'.
+src/app/(app)/alerts.tsx(916,25): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{}'.
+  No index signature with a parameter of type 'string' was found on type '{}'.
+src/app/(app)/alerts.tsx(943,19): error TS2345: Argument of type '(prev: never[]) => any[]' is not assignable to parameter of type 'SetStateAction<never[]>'.
+  Type '(prev: never[]) => any[]' is not assignable to type '(prevState: never[]) => never[]'.
+    Type 'any[]' is not assignable to type 'never[]'.
+      Type 'any' is not assignable to type 'never'.
+src/app/(app)/alerts.tsx(943,61): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(944,11): error TS2698: Spread types may only be created from object types.
+src/app/(app)/alerts.tsx(946,49): error TS2339: Property 'message' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(947,51): error TS2339: Property 'latitude' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(948,53): error TS2339: Property 'longitude' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(949,49): error TS2339: Property 'address' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(950,51): error TS2339: Property 'location' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(985,10): error TS2739: Type '{ children: Element; title: string; subtitle: string; style: { marginBottom: number; }; }' is missing the following properties from type '{ children: any; title: any; subtitle: any; icon: any; action: any; style: any; }': icon, action
+src/app/(app)/alerts.tsx(995,105): error TS2339: Property 'value' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(999,29): error TS2339: Property 'value' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1001,59): error TS2339: Property 'value' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1003,108): error TS2339: Property 'label' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1010,10): error TS2739: Type '{ children: Element; title: string; subtitle: any; style: { marginBottom: number; }; }' is missing the following properties from type '{ children: any; title: any; subtitle: any; icon: any; action: any; style: any; }': icon, action
+src/app/(app)/alerts.tsx(1025,59): error TS2339: Property 'closure_notes' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1026,64): error TS2339: Property 'resolution_summary' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1027,59): error TS2339: Property 'actions_taken' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1028,64): error TS2339: Property 'additional_remarks' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1042,45): error TS2339: Property 'assigned_volunteer_id' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1042,77): error TS2339: Property 'assigned_volunteer' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1043,34): error TS2339: Property 'status' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1044,42): error TS2339: Property 'current_status' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1048,50): error TS2339: Property 'message' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1048,67): error TS2339: Property 'created_at' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1054,58): error TS2339: Property 'status' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1054,117): error TS2339: Property 'status' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1058,62): error TS2339: Property 'message' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1060,43): error TS2339: Property 'alertDetailPanel' does not exist on type '{ pageScroll: { flex: number; backgroundColor: string; }; pageContent: { paddingHorizontal: number; paddingTop: number; paddingBottom: number; }; cardSpacing: { marginBottom: number; }; categoryRow: { ...; }; ... 51 more ...; closureSummaryValue: { ...; }; }'.
+src/app/(app)/alerts.tsx(1063,92): error TS2339: Property 'status' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1063,109): error TS2339: Property 'status' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1067,92): error TS2339: Property 'current_status' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1067,116): error TS2339: Property 'status' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1067,133): error TS2339: Property 'current_status' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1067,157): error TS2339: Property 'status' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1089,83): error TS2339: Property 'created_at' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1111,32): error TS2339: Property 'location' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1111,90): error TS2339: Property 'location' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1114,74): error TS2339: Property 'created_at' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1115,28): error TS2339: Property 'location' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1115,104): error TS2339: Property 'location' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1124,32): error TS2339: Property 'location' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1124,90): error TS2339: Property 'location' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1128,36): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{}'.
+  No index signature with a parameter of type 'string' was found on type '{}'.
+src/app/(app)/alerts.tsx(1128,80): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1128,102): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{}'.
+  No index signature with a parameter of type 'string' was found on type '{}'.
+src/app/(app)/alerts.tsx(1128,144): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1132,38): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{}'.
+  No index signature with a parameter of type 'string' was found on type '{}'.
+src/app/(app)/alerts.tsx(1132,82): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1133,47): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{}'.
+  No index signature with a parameter of type 'string' was found on type '{}'.
+src/app/(app)/alerts.tsx(1133,89): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1136,36): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{}'.
+  No index signature with a parameter of type 'string' was found on type '{}'.
+src/app/(app)/alerts.tsx(1136,80): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1136,102): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{}'.
+  No index signature with a parameter of type 'string' was found on type '{}'.
+src/app/(app)/alerts.tsx(1136,144): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1140,38): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{}'.
+  No index signature with a parameter of type 'string' was found on type '{}'.
+src/app/(app)/alerts.tsx(1140,82): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1141,47): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{}'.
+  No index signature with a parameter of type 'string' was found on type '{}'.
+src/app/(app)/alerts.tsx(1141,89): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1160,26): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{}'.
+  No index signature with a parameter of type 'string' was found on type '{}'.
+src/app/(app)/alerts.tsx(1160,68): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1160,110): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{}'.
+  No index signature with a parameter of type 'string' was found on type '{}'.
+src/app/(app)/alerts.tsx(1160,152): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1161,26): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{}'.
+  No index signature with a parameter of type 'string' was found on type '{}'.
+src/app/(app)/alerts.tsx(1161,70): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1161,111): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{}'.
+  No index signature with a parameter of type 'string' was found on type '{}'.
+src/app/(app)/alerts.tsx(1161,155): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1199,39): error TS2339: Property 'status' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1206,38): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{}'.
+  No index signature with a parameter of type 'string' was found on type '{}'.
+src/app/(app)/alerts.tsx(1206,71): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1206,85): error TS2339: Property 'closure_notes' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1207,115): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1217,38): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{}'.
+  No index signature with a parameter of type 'string' was found on type '{}'.
+src/app/(app)/alerts.tsx(1217,76): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1217,90): error TS2339: Property 'resolution_summary' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1218,120): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1228,38): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{}'.
+  No index signature with a parameter of type 'string' was found on type '{}'.
+src/app/(app)/alerts.tsx(1228,71): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1228,85): error TS2339: Property 'actions_taken' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1229,115): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1239,38): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{}'.
+  No index signature with a parameter of type 'string' was found on type '{}'.
+src/app/(app)/alerts.tsx(1239,76): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1239,90): error TS2339: Property 'additional_remarks' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1240,120): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1246,38): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{}'.
+  No index signature with a parameter of type 'string' was found on type '{}'.
+src/app/(app)/alerts.tsx(1246,73): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1250,40): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{}'.
+  No index signature with a parameter of type 'string' was found on type '{}'.
+src/app/(app)/alerts.tsx(1250,75): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1253,30): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{}'.
+  No index signature with a parameter of type 'string' was found on type '{}'.
+src/app/(app)/alerts.tsx(1253,65): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1253,106): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{}'.
+  No index signature with a parameter of type 'string' was found on type '{}'.
+src/app/(app)/alerts.tsx(1253,141): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1254,30): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{}'.
+  No index signature with a parameter of type 'string' was found on type '{}'.
+src/app/(app)/alerts.tsx(1254,64): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1254,106): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{}'.
+  No index signature with a parameter of type 'string' was found on type '{}'.
+src/app/(app)/alerts.tsx(1254,140): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1275,68): error TS2339: Property 'length' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1280,56): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1280,73): error TS2339: Property 'created_at' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1280,95): error TS2339: Property 'message' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1281,81): error TS2339: Property 'message' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1282,48): error TS2339: Property 'audio_url' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1285,84): error TS2339: Property 'audio_url' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1286,93): error TS2339: Property 'audio_url' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1292,48): error TS2339: Property 'audio_url' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1294,52): error TS2339: Property 'transcription_status' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1296,55): error TS2339: Property 'transcript' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1297,102): error TS2339: Property 'transcript' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1306,81): error TS2339: Property 'sender' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1306,140): error TS2339: Property 'created_at' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1316,79): error TS2339: Property 'address' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1316,96): error TS2339: Property 'location' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1318,98): error TS2339: Property 'latitude' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1318,116): error TS2339: Property 'latitude' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1318,172): error TS2339: Property 'latitude' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1318,190): error TS2339: Property 'latitude' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1318,268): error TS2339: Property 'longitude' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1318,287): error TS2339: Property 'longitude' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1318,344): error TS2339: Property 'longitude' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1318,363): error TS2339: Property 'longitude' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1355,77): error TS2339: Property 'message' does not exist on type 'never'.
+src/app/(app)/alerts.tsx(1402,10): error TS2739: Type '{ children: Element[]; title: string; subtitle: string; style: { marginBottom: number; }; }' is missing the following properties from type '{ children: any; title: any; subtitle: any; icon: any; action: any; style: any; }': icon, action
+src/app/(app)/dashboard.tsx(51,28): error TS2339: Property 'role' does not exist on type 'never'.
+src/app/(app)/dashboard.tsx(52,31): error TS2339: Property 'society' does not exist on type 'never'.
+src/app/(app)/dashboard.tsx(52,48): error TS2339: Property 'flat' does not exist on type 'never'.
+src/app/(app)/dashboard.tsx(52,63): error TS2339: Property 'society' does not exist on type 'never'.
+src/app/(app)/dashboard.tsx(52,86): error TS2339: Property 'flat' does not exist on type 'never'.
+src/app/(app)/dashboard.tsx(52,101): error TS2339: Property 'society' does not exist on type 'never'.
+src/app/(app)/dashboard.tsx(52,118): error TS2339: Property 'flat' does not exist on type 'never'.
+src/app/(app)/dashboard.tsx(78,43): error TS2339: Property 'username' does not exist on type 'never'.
+src/app/(app)/dashboard.tsx(80,9): error TS2322: Type 'Element' is not assignable to type 'undefined'.
+src/app/(app)/dashboard.tsx(83,8): error TS2739: Type '{ children: Element; style: { marginBottom: number; }; }' is missing the following properties from type '{ children: any; title: any; subtitle: any; icon: any; action: any; style: any; }': title, subtitle, icon, action
+src/app/(app)/dashboard.tsx(86,61): error TS2339: Property 'username' does not exist on type 'never'.
+src/app/(app)/dashboard.tsx(87,50): error TS2339: Property 'username' does not exist on type 'never'.
+src/app/(app)/dashboard.tsx(88,50): error TS2339: Property 'society' does not exist on type 'never'.
+src/app/(app)/dashboard.tsx(88,95): error TS2339: Property 'flat' does not exist on type 'never'.
+src/app/(app)/dashboard.tsx(115,8): error TS2739: Type '{ children: Element; title: string; subtitle: string; style: { marginBottom: number; }; }' is missing the following properties from type '{ children: any; title: any; subtitle: any; icon: any; action: any; style: any; }': icon, action
+src/app/(app)/dashboard.tsx(127,8): error TS2739: Type '{ children: Element; title: string; subtitle: string; }' is missing the following properties from type '{ children: any; title: any; subtitle: any; icon: any; action: any; style: any; }': icon, action, style
+src/app/(app)/dashboard.tsx(128,10): error TS2741: Property 'style' is missing in type '{ title: string; onPress: () => void; }' but required in type '{ title: any; onPress: any; variant?: string | undefined; disabled?: boolean | undefined; loading?: boolean | undefined; style: any; textStyle?: undefined; icon?: undefined; }'.
+src/app/(app)/dashboard.tsx(164,53): error TS2339: Property 'grayLight' does not exist on type '{ navy: string; slate: string; blue: string; blueSoft: string; red: string; redSoft: string; amber: string; amberSoft: string; green: string; greenSoft: string; white: string; mist: string; border: string; muted: string; shadow: string; }'.
+src/app/(app)/emergency-chat.tsx(8,30): error TS7006: Parameter 'value' implicitly has an 'any' type.
+src/app/(app)/emergency-chat.tsx(64,27): error TS2339: Property 'response' does not exist on type '{}'.
+src/app/(app)/emergency-chat.tsx(85,7): error TS2345: Argument of type 'string' is not assignable to parameter of type 'null | undefined'.
+src/app/(app)/emergency-chat.tsx(94,25): error TS2339: Property 'close' does not exist on type 'never'.
+src/app/(app)/emergency-chat.tsx(102,7): error TS2322: Type 'WebSocket' is not assignable to type 'null'.
+src/app/(app)/emergency-chat.tsx(122,25): error TS2345: Argument of type '(prev: never[]) => any[]' is not assignable to parameter of type 'SetStateAction<never[]>'.
+  Type '(prev: never[]) => any[]' is not assignable to type '(prevState: never[]) => never[]'.
+    Type 'any[]' is not assignable to type 'never[]'.
+      Type 'any' is not assignable to type 'never'.
+src/app/(app)/emergency-chat.tsx(123,62): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/emergency-chat.tsx(156,11): error TS2322: Type 'number' is not assignable to type 'null'.
+src/app/(app)/emergency-chat.tsx(159,32): error TS2349: This expression is not callable.
+  Type 'never' has no call signatures.
+src/app/(app)/emergency-chat.tsx(170,5): error TS2322: Type '() => Promise<void>' is not assignable to type 'null'.
+src/app/(app)/emergency-chat.tsx(207,27): error TS2339: Property 'close' does not exist on type 'never'.
+src/app/(app)/emergency-chat.tsx(216,27): error TS2339: Property 'scrollToEnd' does not exist on type 'never'.
+src/app/(app)/emergency-chat.tsx(242,21): error TS2345: Argument of type '(prev: never[]) => any[]' is not assignable to parameter of type 'SetStateAction<never[]>'.
+  Type '(prev: never[]) => any[]' is not assignable to type '(prevState: never[]) => never[]'.
+    Type 'any[]' is not assignable to type 'never[]'.
+      Type 'any' is not assignable to type 'never'.
+src/app/(app)/emergency-chat.tsx(243,58): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/emergency-chat.tsx(252,27): error TS2339: Property 'response' does not exist on type '{}'.
+src/app/(app)/emergency-chat.tsx(269,38): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/emergency-chat.tsx(277,11): error TS2322: Type 'Element' is not assignable to type 'undefined'.
+src/app/(app)/emergency-chat.tsx(277,20): error TS2741: Property 'style' is missing in type '{ title: string; variant: string; onPress: () => void; }' but required in type '{ title: any; onPress: any; variant?: string | undefined; disabled?: boolean | undefined; loading?: boolean | undefined; style: any; textStyle?: undefined; icon?: undefined; }'.
+src/app/(app)/emergency-chat.tsx(291,12): error TS2741: Property 'action' is missing in type '{ title: string; message: string; icon: string; }' but required in type '{ title: any; message: any; icon?: string | undefined; action: any; }'.
+src/app/(app)/emergency-chat.tsx(297,46): error TS2339: Property 'sender' does not exist on type 'never'.
+src/app/(app)/emergency-chat.tsx(299,36): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/emergency-chat.tsx(299,53): error TS2339: Property 'created_at' does not exist on type 'never'.
+src/app/(app)/emergency-chat.tsx(299,75): error TS2339: Property 'message' does not exist on type 'never'.
+src/app/(app)/emergency-chat.tsx(302,33): error TS2339: Property 'sender' does not exist on type 'never'.
+src/app/(app)/emergency-chat.tsx(302,73): error TS2339: Property 'sender' does not exist on type 'never'.
+src/app/(app)/emergency-chat.tsx(304,64): error TS2339: Property 'message' does not exist on type 'never'.
+src/app/(app)/emergency-chat.tsx(305,145): error TS2339: Property 'created_at' does not exist on type 'never'.
+src/app/(app)/security-dashboard.tsx(8,28): error TS7006: Parameter 'value' implicitly has an 'any' type.
+src/app/(app)/security-dashboard.tsx(12,29): error TS7006: Parameter 'value' implicitly has an 'any' type.
+src/app/(app)/security-dashboard.tsx(23,24): error TS7006: Parameter 'status' implicitly has an 'any' type.
+src/app/(app)/security-dashboard.tsx(30,26): error TS7006: Parameter 'priority' implicitly has an 'any' type.
+src/app/(app)/security-dashboard.tsx(74,77): error TS7006: Parameter 'item' implicitly has an 'any' type.
+src/app/(app)/security-dashboard.tsx(83,70): error TS7006: Parameter 'item' implicitly has an 'any' type.
+src/app/(app)/security-dashboard.tsx(95,33): error TS2339: Property 'response' does not exist on type '{}'.
+src/app/(app)/security-dashboard.tsx(127,21): error TS2345: Argument of type 'string | null' is not assignable to parameter of type 'SetStateAction<null>'.
+  Type 'string' is not assignable to type 'SetStateAction<null>'.
+src/app/(app)/security-dashboard.tsx(156,15): error TS2339: Property 'name' does not exist on type 'never'.
+src/app/(app)/security-dashboard.tsx(156,33): error TS2339: Property 'name' does not exist on type 'never'.
+src/app/(app)/security-dashboard.tsx(157,15): error TS2339: Property 'username' does not exist on type 'never'.
+src/app/(app)/security-dashboard.tsx(157,37): error TS2339: Property 'username' does not exist on type 'never'.
+src/app/(app)/security-dashboard.tsx(173,12): error TS2741: Property 'style' is missing in type '{ title: string; onPress: () => void; variant: string; }' but required in type '{ title: any; onPress: any; variant?: string | undefined; disabled?: boolean | undefined; loading?: boolean | undefined; style: any; textStyle?: undefined; icon?: undefined; }'.
+src/app/(app)/security-dashboard.tsx(185,10): error TS2741: Property 'subtitle' is missing in type '{ eyebrow: string; title: string; }' but required in type '{ title: any; subtitle: any; eyebrow: any; action?: undefined; }'.
+src/app/(app)/security-dashboard.tsx(201,10): error TS2739: Type '{ children: Element; title: string; icon: string; }' is missing the following properties from type '{ children: any; title: any; subtitle: any; icon: any; action: any; style: any; }': subtitle, action, style
+src/app/(app)/security-dashboard.tsx(216,77): error TS2339: Property 'total_incidents' does not exist on type 'never'.
+src/app/(app)/security-dashboard.tsx(223,77): error TS2339: Property 'active_incidents' does not exist on type 'never'.
+src/app/(app)/security-dashboard.tsx(230,77): error TS2339: Property 'escalated_incidents' does not exist on type 'never'.
+src/app/(app)/security-dashboard.tsx(237,77): error TS2339: Property 'resolved_incidents' does not exist on type 'never'.
+src/app/(app)/security-dashboard.tsx(244,77): error TS2339: Property 'active_societies' does not exist on type 'never'.
+src/app/(app)/security-dashboard.tsx(248,14): error TS2741: Property 'action' is missing in type '{ title: string; message: string; icon: string; }' but required in type '{ title: any; message: any; icon?: string | undefined; action: any; }'.
+src/app/(app)/security-dashboard.tsx(252,10): error TS2739: Type '{ children: Element; title: string; icon: string; }' is missing the following properties from type '{ children: any; title: any; subtitle: any; icon: any; action: any; style: any; }': subtitle, action, style
+src/app/(app)/security-dashboard.tsx(273,10): error TS2739: Type '{ children: Element | Element[]; title: string; icon: string; }' is missing the following properties from type '{ children: any; title: any; subtitle: any; icon: any; action: any; style: any; }': subtitle, action, style
+src/app/(app)/security-dashboard.tsx(276,31): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/security-dashboard.tsx(278,60): error TS2339: Property 'title' does not exist on type 'never'.
+src/app/(app)/security-dashboard.tsx(279,78): error TS2339: Property 'time' does not exist on type 'never'.
+src/app/(app)/security-dashboard.tsx(281,23): error TS2339: Property 'description' does not exist on type 'never'.
+src/app/(app)/security-dashboard.tsx(281,84): error TS2339: Property 'description' does not exist on type 'never'.
+src/app/(app)/security-dashboard.tsx(282,59): error TS2339: Property 'status' does not exist on type 'never'.
+src/app/(app)/security-dashboard.tsx(290,10): error TS2739: Type '{ children: Element | Element[]; title: string; icon: string; }' is missing the following properties from type '{ children: any; title: any; subtitle: any; icon: any; action: any; style: any; }': subtitle, action, style
+src/app/(app)/security-dashboard.tsx(293,35): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/security-dashboard.tsx(296,66): error TS2339: Property 'title' does not exist on type 'never'.
+src/app/(app)/security-dashboard.tsx(297,74): error TS2339: Property 'priority' does not exist on type 'never'.
+src/app/(app)/security-dashboard.tsx(298,64): error TS2339: Property 'priority' does not exist on type 'never'.
+src/app/(app)/security-dashboard.tsx(302,77): error TS2339: Property 'status' does not exist on type 'never'.
+src/app/(app)/security-dashboard.tsx(303,69): error TS2339: Property 'status' does not exist on type 'never'.
+src/app/(app)/security-dashboard.tsx(305,65): error TS2339: Property 'society' does not exist on type 'never'.
+src/app/(app)/security-dashboard.tsx(307,82): error TS2339: Property 'time' does not exist on type 'never'.
+src/app/(app)/security-dashboard.tsx(312,120): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/security-dashboard.tsx(318,115): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/security-dashboard.tsx(352,22): error TS2339: Property 'slateDark' does not exist on type '{ navy: string; slate: string; blue: string; blueSoft: string; red: string; redSoft: string; amber: string; amberSoft: string; green: string; greenSoft: string; white: string; mist: string; border: string; muted: string; shadow: string; }'.
+src/app/(app)/security-dashboard.tsx(408,22): error TS2339: Property 'danger' does not exist on type '{ navy: string; slate: string; blue: string; blueSoft: string; red: string; redSoft: string; amber: string; amberSoft: string; green: string; greenSoft: string; white: string; mist: string; border: string; muted: string; shadow: string; }'.
+src/app/(app)/security-incidents.tsx(8,24): error TS7006: Parameter 'params' implicitly has an 'any' type.
+src/app/(app)/security-incidents.tsx(8,32): error TS7006: Parameter 'key' implicitly has an 'any' type.
+src/app/(app)/security-incidents.tsx(16,29): error TS7006: Parameter 'value' implicitly has an 'any' type.
+src/app/(app)/security-incidents.tsx(29,24): error TS7006: Parameter 'status' implicitly has an 'any' type.
+src/app/(app)/security-incidents.tsx(41,22): error TS2339: Property 'data' does not exist on type '{}'.
+src/app/(app)/security-incidents.tsx(45,15): error TS2339: Property 'id' does not exist on type '{}'.
+src/app/(app)/security-incidents.tsx(47,27): error TS2339: Property 'id' does not exist on type '{}'.
+src/app/(app)/security-incidents.tsx(48,122): error TS2339: Property 'title' does not exist on type '{}'.
+src/app/(app)/security-incidents.tsx(53,25): error TS2339: Property 'received_at' does not exist on type '{}'.
+src/app/(app)/security-incidents.tsx(53,46): error TS2339: Property 'created_at' does not exist on type '{}'.
+src/app/(app)/security-incidents.tsx(56,20): error TS2339: Property 'body' does not exist on type '{}'.
+src/app/(app)/security-incidents.tsx(121,21): error TS2345: Argument of type '{ residentName: any; society: any; blockTower: any; flat: any; sosType: any; incidentTime: any; priority: any; status: any; message: any; id: any; alertId: any; notificationId: any; }' is not assignable to parameter of type 'SetStateAction<null>'.
+  Type '{ residentName: any; society: any; blockTower: any; flat: any; sosType: any; incidentTime: any; priority: any; status: any; message: any; id: any; alertId: any; notificationId: any; }' provides no match for the signature '(prevState: null): null'.
+src/app/(app)/security-incidents.tsx(123,21): error TS2345: Argument of type '{ id: any; alertId: any; notificationId: any; residentName: any; society: any; blockTower: any; flat: any; sosType: any; incidentTime: any; priority: any; status: any; message: any; } | null' is not assignable to parameter of type 'SetStateAction<null>'.
+  Type '{ id: any; alertId: any; notificationId: any; residentName: any; society: any; blockTower: any; flat: any; sosType: any; incidentTime: any; priority: any; status: any; message: any; }' is not assignable to type 'SetStateAction<null>'.
+    Type '{ id: any; alertId: any; notificationId: any; residentName: any; society: any; blockTower: any; flat: any; sosType: any; incidentTime: any; priority: any; status: any; message: any; }' provides no match for the signature '(prevState: null): null'.
+src/app/(app)/security-incidents.tsx(126,33): error TS2339: Property 'response' does not exist on type '{}'.
+src/app/(app)/security-incidents.tsx(126,70): error TS2339: Property 'message' does not exist on type '{}'.
+src/app/(app)/security-incidents.tsx(150,26): error TS2339: Property 'alertId' does not exist on type 'never'.
+src/app/(app)/security-incidents.tsx(151,21): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/security-incidents.tsx(152,38): error TS2339: Property 'assigned_volunteer_id' does not exist on type 'never'.
+src/app/(app)/security-incidents.tsx(152,73): error TS2339: Property 'assigned_volunteer' does not exist on type 'never'.
+src/app/(app)/security-incidents.tsx(153,25): error TS2339: Property 'status' does not exist on type 'never'.
+src/app/(app)/security-incidents.tsx(154,33): error TS2339: Property 'current_status' does not exist on type 'never'.
+src/app/(app)/security-incidents.tsx(157,19): error TS2339: Property 'alertId' does not exist on type 'never'.
+src/app/(app)/security-incidents.tsx(158,48): error TS2339: Property 'alertId' does not exist on type 'never'.
+src/app/(app)/security-incidents.tsx(167,26): error TS2339: Property 'alertId' does not exist on type 'never'.
+src/app/(app)/security-incidents.tsx(168,21): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/security-incidents.tsx(169,38): error TS2339: Property 'assigned_volunteer_id' does not exist on type 'never'.
+src/app/(app)/security-incidents.tsx(169,73): error TS2339: Property 'assigned_volunteer' does not exist on type 'never'.
+src/app/(app)/security-incidents.tsx(170,25): error TS2339: Property 'status' does not exist on type 'never'.
+src/app/(app)/security-incidents.tsx(171,33): error TS2339: Property 'current_status' does not exist on type 'never'.
+src/app/(app)/security-incidents.tsx(174,19): error TS2339: Property 'alertId' does not exist on type 'never'.
+src/app/(app)/security-incidents.tsx(175,48): error TS2339: Property 'alertId' does not exist on type 'never'.
+src/app/(app)/security-incidents.tsx(189,20): error TS2741: Property 'style' is missing in type '{ title: string; onPress: () => void; variant: string; }' but required in type '{ title: any; onPress: any; variant?: string | undefined; disabled?: boolean | undefined; loading?: boolean | undefined; style: any; textStyle?: undefined; icon?: undefined; }'.
+src/app/(app)/security-incidents.tsx(199,10): error TS2739: Type '{ children: Element; title: string; subtitle: string; icon: string; }' is missing the following properties from type '{ children: any; title: any; subtitle: any; icon: any; action: any; style: any; }': action, style
+src/app/(app)/security-incidents.tsx(212,20): error TS2741: Property 'style' is missing in type '{ title: string; onPress: () => void; variant: string; }' but required in type '{ title: any; onPress: any; variant?: string | undefined; disabled?: boolean | undefined; loading?: boolean | undefined; style: any; textStyle?: undefined; icon?: undefined; }'.
+src/app/(app)/security-incidents.tsx(218,12): error TS2741: Property 'action' is missing in type '{ children: Element[]; title: string; subtitle: string; icon: string; style: { marginBottom: number; }; }' but required in type '{ children: any; title: any; subtitle: any; icon: any; action: any; style: any; }'.
+src/app/(app)/security-incidents.tsx(222,54): error TS2339: Property 'residentName' does not exist on type 'never'.
+src/app/(app)/security-incidents.tsx(224,44): error TS2339: Property 'status' does not exist on type 'never'.
+src/app/(app)/security-incidents.tsx(224,81): error TS2339: Property 'status' does not exist on type 'never'.
+src/app/(app)/security-incidents.tsx(230,54): error TS2339: Property 'society' does not exist on type 'never'.
+src/app/(app)/security-incidents.tsx(234,54): error TS2339: Property 'blockTower' does not exist on type 'never'.
+src/app/(app)/security-incidents.tsx(241,54): error TS2339: Property 'flat' does not exist on type 'never'.
+src/app/(app)/security-incidents.tsx(245,54): error TS2339: Property 'sosType' does not exist on type 'never'.
+src/app/(app)/security-incidents.tsx(252,73): error TS2339: Property 'incidentTime' does not exist on type 'never'.
+src/app/(app)/security-incidents.tsx(256,54): error TS2339: Property 'priority' does not exist on type 'never'.
+src/app/(app)/security-incidents.tsx(262,58): error TS2339: Property 'message' does not exist on type 'never'.
+src/app/(app)/security-incidents.tsx(266,12): error TS2739: Type '{ children: (Element | null)[]; title: string; subtitle: string; icon: string; }' is missing the following properties from type '{ children: any; title: any; subtitle: any; icon: any; action: any; style: any; }': action, style
+src/app/(app)/settings.tsx(22,32): error TS2339: Property 'role' does not exist on type 'never'.
+src/app/(app)/settings.tsx(43,8): error TS2739: Type '{ children: Element[]; title: string; subtitle: string; style: { marginBottom: number; }; }' is missing the following properties from type '{ children: any; title: any; subtitle: any; icon: any; action: any; style: any; }': icon, action
+src/app/(app)/settings.tsx(47,52): error TS2339: Property 'role' does not exist on type 'never'.
+src/app/(app)/settings.tsx(51,52): error TS2339: Property 'email' does not exist on type 'never'.
+src/app/(app)/settings.tsx(56,10): error TS2739: Type '{ children: Element; title: string; subtitle: string; style: { marginBottom: number; }; }' is missing the following properties from type '{ children: any; title: any; subtitle: any; icon: any; action: any; style: any; }': icon, action
+src/app/(app)/settings.tsx(61,8): error TS2739: Type '{ children: Element[]; title: string; subtitle: string; style: { marginBottom: number; }; }' is missing the following properties from type '{ children: any; title: any; subtitle: any; icon: any; action: any; style: any; }': icon, action
+src/app/(app)/settings.tsx(69,8): error TS2739: Type '{ children: Element[]; title: string; subtitle: string; style: { marginBottom: number; }; }' is missing the following properties from type '{ children: any; title: any; subtitle: any; icon: any; action: any; style: any; }': icon, action
+src/app/(app)/settings.tsx(75,8): error TS2739: Type '{ children: Element[]; title: string; subtitle: string; style: { marginBottom: number; }; }' is missing the following properties from type '{ children: any; title: any; subtitle: any; icon: any; action: any; style: any; }': icon, action
+src/app/(app)/settings.tsx(83,8): error TS2739: Type '{ children: Element; title: string; style: { marginBottom: number; }; }' is missing the following properties from type '{ children: any; title: any; subtitle: any; icon: any; action: any; style: any; }': subtitle, icon, action
+src/app/(app)/settings.tsx(132,23): error TS7031: Binding element 'label' implicitly has an 'any' type.
+src/app/(app)/volunteer-incidents.tsx(10,29): error TS7006: Parameter 'value' implicitly has an 'any' type.
+src/app/(app)/volunteer-incidents.tsx(21,28): error TS7006: Parameter 'value' implicitly has an 'any' type.
+src/app/(app)/volunteer-incidents.tsx(50,29): error TS2339: Property 'response' does not exist on type '{}'.
+src/app/(app)/volunteer-incidents.tsx(50,62): error TS2339: Property 'response' does not exist on type '{}'.
+src/app/(app)/volunteer-incidents.tsx(63,20): error TS2345: Argument of type '{ id: any; alertId: any; status: any; current_status: any; message: any; location: any; address: any; city: any; state: any; country: any; latitude: number | null; longitude: number | null; sosType: any; ... 12 more ...; assigned_volunteer_name: any; }[]' is not assignable to parameter of type 'SetStateAction<never[]>'.
+  Type '{ id: any; alertId: any; status: any; current_status: any; message: any; location: any; address: any; city: any; state: any; country: any; latitude: number | null; longitude: number | null; sosType: any; ... 12 more ...; assigned_volunteer_name: any; }[]' is not assignable to type 'never[]'.
+    Type '{ id: any; alertId: any; status: any; current_status: any; message: any; location: any; address: any; city: any; state: any; country: any; latitude: number | null; longitude: number | null; sosType: any; ... 12 more ...; assigned_volunteer_name: any; }' is not assignable to type 'never'.
+src/app/(app)/volunteer-incidents.tsx(65,29): error TS2339: Property 'response' does not exist on type '{}'.
+src/app/(app)/volunteer-incidents.tsx(92,43): error TS7006: Parameter 'nextValue' implicitly has an 'any' type.
+src/app/(app)/volunteer-incidents.tsx(106,35): error TS2339: Property 'response' does not exist on type '{}'.
+src/app/(app)/volunteer-incidents.tsx(120,39): error TS7006: Parameter 'incident' implicitly has an 'any' type.
+src/app/(app)/volunteer-incidents.tsx(137,29): error TS2339: Property 'response' does not exist on type '{}'.
+src/app/(app)/volunteer-incidents.tsx(137,62): error TS2339: Property 'response' does not exist on type '{}'.
+src/app/(app)/volunteer-incidents.tsx(143,30): error TS7006: Parameter 'incident' implicitly has an 'any' type.
+src/app/(app)/volunteer-incidents.tsx(174,20): error TS2741: Property 'style' is missing in type '{ title: string; onPress: () => void; variant: string; }' but required in type '{ title: any; onPress: any; variant?: string | undefined; disabled?: boolean | undefined; loading?: boolean | undefined; style: any; textStyle?: undefined; icon?: undefined; }'.
+src/app/(app)/volunteer-incidents.tsx(193,8): error TS2741: Property 'action' is missing in type '{ children: (Element | null)[]; title: string; subtitle: string; icon: string; style: { marginBottom: number; }; }' but required in type '{ children: any; title: any; subtitle: any; icon: any; action: any; style: any; }'.
+src/app/(app)/volunteer-incidents.tsx(216,8): error TS2739: Type '{ children: (Element | Element[] | null)[]; title: string; subtitle: string; icon: string; }' is missing the following properties from type '{ children: any; title: any; subtitle: any; icon: any; action: any; style: any; }': action, style
+src/app/(app)/volunteer-incidents.tsx(225,12): error TS2741: Property 'action' is missing in type '{ title: string; message: string; icon: string; }' but required in type '{ title: any; message: any; icon?: string | undefined; action: any; }'.
+src/app/(app)/volunteer-incidents.tsx(235,43): error TS2339: Property 'assigned_volunteer_id' does not exist on type 'never'.
+src/app/(app)/volunteer-incidents.tsx(235,77): error TS2339: Property 'assigned_volunteer' does not exist on type 'never'.
+src/app/(app)/volunteer-incidents.tsx(236,45): error TS2339: Property 'assigned_volunteer_name' does not exist on type 'never'.
+src/app/(app)/volunteer-incidents.tsx(240,62): error TS2339: Property 'status' does not exist on type 'never'.
+src/app/(app)/volunteer-incidents.tsx(240,110): error TS2339: Property 'status' does not exist on type 'never'.
+src/app/(app)/volunteer-incidents.tsx(244,28): error TS2339: Property 'society' does not exist on type 'never'.
+src/app/(app)/volunteer-incidents.tsx(244,61): error TS2339: Property 'society' does not exist on type 'never'.
+src/app/(app)/volunteer-incidents.tsx(245,28): error TS2339: Property 'blockFlat' does not exist on type 'never'.
+src/app/(app)/volunteer-incidents.tsx(245,63): error TS2339: Property 'blockFlat' does not exist on type 'never'.
+src/app/(app)/volunteer-incidents.tsx(248,37): error TS2339: Property 'id' does not exist on type 'never'.
+src/app/(app)/volunteer-incidents.tsx(251,71): error TS2339: Property 'residentName' does not exist on type 'never'.
+src/app/(app)/volunteer-incidents.tsx(251,96): error TS2339: Property 'user' does not exist on type 'never'.
+src/app/(app)/volunteer-incidents.tsx(260,68): error TS2339: Property 'sosType' does not exist on type 'never'.
+src/app/(app)/volunteer-incidents.tsx(264,87): error TS2339: Property 'time' does not exist on type 'never'.
+src/app/(app)/volunteer-incidents.tsx(271,68): error TS2339: Property 'address' does not exist on type 'never'.
+src/app/(app)/volunteer-incidents.tsx(271,88): error TS2339: Property 'location' does not exist on type 'never'.
+src/app/(app)/volunteer-incidents.tsx(275,68): error TS2339: Property 'distance' does not exist on type 'never'.
+src/app/(app)/volunteer-incidents.tsx(275,103): error TS2339: Property 'distance' does not exist on type 'never'.
+src/app/(app)/volunteer-incidents.tsx(279,29): error TS2339: Property 'message' does not exist on type 'never'.
+src/app/(app)/volunteer-incidents.tsx(279,86): error TS2339: Property 'message' does not exist on type 'never'.

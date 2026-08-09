@@ -9,9 +9,9 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 from rest_framework import status
 
-from notifications.models import Notification, NotificationDelivery, EscalationLog
+from notifications.models import Notification, NotificationDelivery, EscalationLog, NotificationTemplate
 from society.models import Society
-from users.models import GuardianProfile, ResidentProfile, SecurityProfile, VolunteerProfile
+from users.models import EmergencyContact, GuardianProfile, ResidentProfile, SecurityProfile, VolunteerProfile
 from .models import SOS, SOSMessage, SOSStatusEvent, ResponseUpdate
 from .serializers import SOSSerializer
 
@@ -1129,6 +1129,30 @@ class SOSCategoryFlowTests(TestCase):
         saved_sos = SOS.objects.get(user=self.user)
         self.assertEqual(saved_sos.category, "medical")
 
+    def test_sos_creation_uses_sos_created_notification_template(self):
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/api/sos/trigger/",
+            {
+                "message": "Need urgent help",
+                "location": "Block 3",
+                "category": "medical",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        saved_sos = SOS.objects.get(user=self.user)
+        self.assertTrue(
+            Notification.objects.filter(
+                kind="SOS",
+                data__alert_id=str(saved_sos.id),
+                title="SOS Created",
+                body__contains=self.user.username,
+            ).exists()
+        )
+
     def test_sos_creation_defaults_priority_to_high(self):
         self.client.force_authenticate(user=self.user)
 
@@ -1146,6 +1170,76 @@ class SOSCategoryFlowTests(TestCase):
         self.assertEqual(response.data["priority"], "HIGH")
         saved_sos = SOS.objects.get(user=self.user)
         self.assertEqual(saved_sos.priority, "HIGH")
+
+    @patch("sos.views.send_sms_notification_task.delay")
+    @patch("sos.views.send_email_notification_task.delay")
+    @patch("sos.views.send_push_notification_task.delay")
+    def test_emergency_contact_alert_uses_db_template_and_renders_resident_name(self, mock_push, mock_email, mock_sms):
+        self.user.resident_profile = ResidentProfile.objects.create(user=self.user, society=None, block=None, flat=None)
+        EmergencyContact.objects.create(
+            resident=self.user.resident_profile,
+            name="Test Emergency Contact",
+            phone="+15550000003",
+            relationship="Friend",
+            contact_type=EmergencyContact.ContactType.EMERGENCY_CONTACT,
+            is_verified=True,
+        )
+
+        NotificationTemplate.objects.filter(template_key="emergency_contact_alert").update(
+            subject="Emergency contact {{resident_name}}",
+            title="Confirm {{resident_name}}",
+            body="Verify emergency contact for {{resident_name}} at {{address}}",
+            is_active=True,
+        )
+
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(
+            "/api/sos/trigger/",
+            {
+                "message": "Need urgent help",
+                "location": "Block 3",
+                "category": "medical",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(mock_sms.called)
+        call_args = mock_sms.call_args[0]
+        self.assertEqual(call_args[0], ["+15550000003"])
+        self.assertIn(self.user.username, call_args[1])
+        self.assertIn("Block 3", call_args[1])
+
+    @patch("sos.views.send_sms_notification_task.delay")
+    @patch("sos.views.send_email_notification_task.delay")
+    @patch("sos.views.send_push_notification_task.delay")
+    def test_emergency_contact_alert_falls_back_when_template_missing(self, mock_push, mock_email, mock_sms):
+        self.user.resident_profile = ResidentProfile.objects.create(user=self.user, society=None, block=None, flat=None)
+        EmergencyContact.objects.create(
+            resident=self.user.resident_profile,
+            name="Test Emergency Contact",
+            phone="+15550000004",
+            relationship="Friend",
+            contact_type=EmergencyContact.ContactType.EMERGENCY_CONTACT,
+            is_verified=True,
+        )
+        NotificationTemplate.objects.filter(template_key="emergency_contact_alert").update(is_active=False)
+
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(
+            "/api/sos/trigger/",
+            {
+                "message": "Need urgent help",
+                "location": "Block 3",
+                "category": "medical",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(mock_sms.called)
+        call_args = mock_sms.call_args[0]
+        self.assertIn(self.user.username, call_args[1])
 
     @patch("sos.views.send_sms_notification_task.delay")
     @patch("sos.views.send_email_notification_task.delay")
@@ -1216,6 +1310,48 @@ class SOSCategoryFlowTests(TestCase):
         self.assertEqual(Notification.objects.filter(kind="SOS", user=volunteer_user).count(), 1)
         self.assertEqual(Notification.objects.filter(kind="SOS", user=self.admin_user).count(), 1)
         self.assertEqual(Notification.objects.filter(kind="SOS").count(), 5)
+
+    def test_sos_acceptance_uses_sos_accepted_notification_template(self):
+        volunteer_user = self.user_model.objects.create_user(
+            username="volunteer_notification",
+            email="volunteer_notification@example.com",
+            password="testpass123",
+            role="VOLUNTEER",
+        )
+        sos = SOS.objects.create(user=self.user, message="Need help", location="Block 7", category="medical")
+
+        self.client.force_authenticate(user=volunteer_user)
+        response = self.client.patch(f"/api/sos/{sos.id}/", {"action": "accept"}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(
+            Notification.objects.filter(
+                user=self.user,
+                kind="SOS",
+                data__type="SOS_ACCEPTED",
+                data__alert_id=str(sos.id),
+                title="SOS Accepted",
+                body__contains=volunteer_user.username,
+            ).exists()
+        )
+
+    def test_admin_resolve_uses_sos_resolved_notification_template(self):
+        sos = SOS.objects.create(user=self.user, message="Need help", location="Block 10", category="medical", status="OPEN")
+
+        self.client.force_authenticate(user=self.admin_user)
+        response = self.client.patch(f"/api/sos/{sos.id}/", {"status": "RESOLVED"}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(
+            Notification.objects.filter(
+                user=self.user,
+                kind="SOS",
+                data__type="SOS_RESOLVED",
+                data__alert_id=str(sos.id),
+                title="SOS Resolved",
+                body__contains=self.user.username,
+            ).exists()
+        )
 
     def test_sos_routing_deduplicates_overlapping_role_recipients(self):
         self.client.force_authenticate(user=self.user)

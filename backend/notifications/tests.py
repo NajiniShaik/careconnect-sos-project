@@ -10,7 +10,7 @@ from rest_framework import status
 from sos.models import SOS
 from society.models import Society
 from users.models import EmergencyContact, GuardianProfile, ResidentProfile, SecurityProfile, VolunteerProfile
-from .models import DeviceToken, Notification, NotificationDelivery, EscalationConfiguration, EscalationLog, CommunityBroadcastLog
+from .models import DeviceToken, Notification, NotificationDelivery, EscalationConfiguration, EscalationLog, CommunityBroadcastLog, NotificationTemplate
 from .tasks import (
     process_guardian_escalation_task,
     process_community_broadcast_task,
@@ -488,6 +488,65 @@ class CommunityBroadcastTests(TestCase):
         self.assertTrue(response.data["residents"] >= 1)
         self.assertTrue(response.data["total_recipients"] >= 3)
 
+    @patch("notifications.tasks.send_email_notification_task.delay")
+    @patch("notifications.tasks.send_sms_notification_task.delay")
+    @patch("notifications.tasks.send_push_notification_task.delay")
+    def test_community_broadcast_uses_db_template_and_renders_real_variables(self, mock_push, mock_sms, mock_email):
+        BroadcastUser = self.user_model
+        security_user = BroadcastUser.objects.create_user(
+            username="security_broadcast_template",
+            email="security_broadcast_template@example.com",
+            password="testpass123",
+            role="SECURITY",
+        )
+        security_user.phone = "+15550000001"
+        security_user.save(update_fields=["phone"])
+        ResidentProfile.objects.create(user=security_user, society=self.society, block=None, flat=None)
+
+        self.sos.category = "medical"
+        self.sos.location = "Block 3"
+        self.sos.save(update_fields=["category", "location"])
+
+        NotificationTemplate.objects.filter(template_key="community_broadcast").update(
+            subject="Broadcast {{incident_id}}",
+            title="Broadcast {{category}}",
+            body="Alert for {{resident_name}} at {{address}}",
+            is_active=True,
+        )
+
+        service = CommunityBroadcastService()
+        service.broadcast(self.sos.id, include_residents=False)
+
+        notification = Notification.objects.filter(user=security_user, kind="SOS", data__type="COMMUNITY_BROADCAST").order_by("-created_at").first()
+        self.assertIsNotNone(notification)
+        self.assertEqual(notification.title, "Broadcast medical")
+        self.assertEqual(notification.body, f"Alert for {self.resident_user.username} at Block 3")
+        self.assertTrue(mock_push.called)
+        self.assertTrue(any(call.args[1] == notification.title for call in mock_push.call_args_list))
+        self.assertTrue(any(call.args[2] == notification.body for call in mock_push.call_args_list))
+
+    @patch("notifications.tasks.send_email_notification_task.delay")
+    @patch("notifications.tasks.send_sms_notification_task.delay")
+    @patch("notifications.tasks.send_push_notification_task.delay")
+    def test_community_broadcast_falls_back_when_template_missing(self, mock_push, mock_sms, mock_email):
+        NotificationTemplate.objects.filter(template_key="community_broadcast").update(is_active=False)
+        security_user = self.user_model.objects.create_user(
+            username="security_broadcast_fallback",
+            email="security_broadcast_fallback@example.com",
+            password="testpass123",
+            role="SECURITY",
+        )
+        security_user.phone = "+15550000002"
+        security_user.save(update_fields=["phone"])
+        ResidentProfile.objects.create(user=security_user, society=self.society, block=None, flat=None)
+
+        service = CommunityBroadcastService()
+        service.broadcast(self.sos.id, include_residents=False)
+
+        self.assertTrue(mock_push.called)
+        self.assertEqual(mock_push.call_args[0][1], "Community Broadcast")
+        self.assertTrue(mock_push.call_args[0][2].startswith("Community broadcast: SOS"))
+
     def test_broadcast_endpoint_rejects_invalid_sos(self):
         self.client.force_authenticate(user=self.resident_user)
         response = self.client.post("/api/notifications/community-broadcast/", {"sos_id": 9999}, format="json")
@@ -808,6 +867,49 @@ class GuardianEscalationTaskTests(TestCase):
         mock_push.assert_called_once()
         mock_sms.assert_called_once()
         mock_email.assert_called_once()
+
+    @patch("notifications.tasks.send_email_notification_task.delay")
+    @patch("notifications.tasks.send_sms_notification_task.delay")
+    @patch("notifications.tasks.send_push_notification_task.delay")
+    def test_escalation_uses_db_template_and_renders_resident_data(self, mock_push, mock_sms, mock_email):
+        NotificationTemplate.objects.filter(template_key="escalation").update(
+            subject="Escalation {{incident_id}}",
+            title="Escalation for {{resident_name}}",
+            body="Guardian alert for {{resident_name}}: incident {{incident_id}} category {{category}}",
+            is_active=True,
+        )
+        sos = self._create_sos()
+
+        process_guardian_escalation_task()
+
+        notification = Notification.objects.filter(
+            user=self.secondary_guardian_user,
+            kind="SOS",
+            data__type="SOS_ESCALATION",
+        ).order_by("-created_at").first()
+        self.assertIsNotNone(notification)
+        self.assertEqual(notification.title, f"Escalation for {self.resident_user.username}")
+        self.assertIn(str(sos.id), notification.body)
+        self.assertIn(self.resident_user.username, notification.body)
+        mock_push.assert_called_once()
+        self.assertEqual(mock_push.call_args[0][1], notification.title)
+        self.assertEqual(mock_push.call_args[0][2], notification.body)
+        self.assertEqual(mock_sms.call_args[0][1], notification.body)
+        self.assertEqual(mock_email.call_args[0][1], f"Escalation {sos.id}")
+
+    @patch("notifications.tasks.send_email_notification_task.delay")
+    @patch("notifications.tasks.send_sms_notification_task.delay")
+    @patch("notifications.tasks.send_push_notification_task.delay")
+    def test_escalation_falls_back_when_template_missing(self, mock_push, mock_sms, mock_email):
+        NotificationTemplate.objects.filter(template_key="escalation").update(is_active=False)
+        sos = self._create_sos()
+
+        process_guardian_escalation_task()
+
+        mock_push.assert_called_once()
+        self.assertEqual(mock_push.call_args[0][1], "Guardian Escalation Alert")
+        self.assertEqual(mock_push.call_args[0][2], f"SOS {sos.id} requires guardian escalation.")
+        self.assertEqual(mock_email.call_args[0][1], "Guardian Escalation Alert")
 
     @patch("notifications.tasks.send_email_notification_task.delay")
     @patch("notifications.tasks.send_sms_notification_task.delay")

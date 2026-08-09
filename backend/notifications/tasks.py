@@ -20,7 +20,7 @@ except ImportError:
 from django.utils import timezone
 
 from notifications.models import EscalationConfiguration, EscalationLog, Notification, NotificationDelivery
-from notifications.services import NotificationService
+from notifications.services import NotificationService, render_notification_template
 from .community_broadcast import CommunityBroadcastService
 from sos.models import SOS
 from users.models import EmergencyContact, GuardianProfile
@@ -105,10 +105,43 @@ def _record_escalation_log(sos, escalation_level, recipient_user, recipient_cont
 
 
 def _dispatch_escalation_notification(sos, recipient_user, title, body, sms_numbers=None, email_recipients=None, escalation_level=None, escalation_reason=None, response_timeout_minutes=0):
+    block_name = ""
+    flat_name = ""
+    try:
+        profile = getattr(sos.user, "resident_profile", None)
+        if profile and getattr(profile, "block", None):
+            block_name = profile.block.name or ""
+        if profile and getattr(profile, "flat", None):
+            flat_name = getattr(profile.flat, "flat_number", "")
+    except Exception:
+        block_name = ""
+        flat_name = ""
+
+    template_context = {
+        "incident_id": str(sos.id),
+        "resident_name": getattr(sos.user, "username", "Resident"),
+        "category": sos.category or "SOS",
+        "society_name": getattr(getattr(sos.user, "resident_profile", None), "society", None) and getattr(sos.user.resident_profile.society, "name", "") or "",
+        "block_name": block_name or "",
+        "flat_name": flat_name or "",
+        "timestamp": sos.created_at.isoformat() if getattr(sos, "created_at", None) else "",
+        "address": sos.address or sos.location or "",
+        "message": sos.message or "",
+        "latitude": sos.latitude,
+        "longitude": sos.longitude,
+        "severity": getattr(sos, "priority", "") or "",
+    }
+    rendered = render_notification_template(
+        "escalation",
+        template_context,
+        default_subject=title,
+        default_title=title,
+        default_body=body,
+    )
     notification = Notification.objects.create(
         user=recipient_user,
-        title=title,
-        body=body,
+        title=rendered["title"],
+        body=rendered["body"],
         kind="SOS",
         data={
             "type": "SOS_ESCALATION",
@@ -126,9 +159,9 @@ def _dispatch_escalation_notification(sos, recipient_user, title, body, sms_numb
     if not email_addresses:
         email_addresses = [getattr(recipient_user, "email", None)] if getattr(recipient_user, "email", None) else ["guardian-escalation@example.com"]
 
-    send_push_notification_task.delay([], title, body, data={"notification_id": notification.id, "alert_id": str(sos.id)})
-    send_email_notification_task.delay(email_addresses, title, "notifications/sos_notification", {"notification_id": notification.id, "resident_name": sos.user.username if sos.user else "Resident"})
-    send_sms_notification_task.delay(phone_numbers, body, notification_id=notification.id)
+    send_push_notification_task.delay([], rendered["title"], rendered["body"], data={"notification_id": notification.id, "alert_id": str(sos.id)})
+    send_email_notification_task.delay(email_addresses, rendered["subject"], "notifications/sos_notification", {"notification_id": notification.id, "resident_name": sos.user.username if sos.user else "Resident"})
+    send_sms_notification_task.delay(phone_numbers, rendered["body"], notification_id=notification.id)
 
     recipient_contact = phone_numbers[0] if phone_numbers else ""
     _record_escalation_log(

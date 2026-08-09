@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 
 import AdminLayout from "../components/common/AdminLayout";
 import PageTitle from "../components/common/PageTitle";
@@ -6,6 +6,14 @@ import DataTable from "../components/common/DataTable";
 import Charts from "../components/common/Charts";
 import { getReporting, downloadReportingExcel, downloadReportingPdf } from "../api/reportingApi";
 import { getSocieties } from "../api/societyApi";
+
+const REPORTING_CATEGORIES = [
+  { value: "medical", label: "Medical" },
+  { value: "fire", label: "Fire" },
+  { value: "other", label: "Other" },
+  { value: "security", label: "Security" },
+  { value: "power", label: "Power" },
+];
 
 function formatSeconds(seconds) {
   if (seconds === null || seconds === undefined || Number.isNaN(Number(seconds))) {
@@ -50,7 +58,6 @@ function StatCard({ label, value, description, tone = "primary" }) {
 export default function ReportingDashboard() {
   const [report, setReport] = useState(null);
   const [societies, setSocieties] = useState([]);
-  const [availableCategories, setAvailableCategories] = useState([]);
   const [filters, setFilters] = useState({
     start_date: "",
     end_date: "",
@@ -61,10 +68,13 @@ export default function ReportingDashboard() {
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState("");
 
+  const requestIdRef = useRef(0);
+
   useEffect(() => {
     const loadPage = async () => {
       setLoading(true);
       setError("");
+      const requestId = ++requestIdRef.current;
 
       try {
         const [societyResponse, reportResponse] = await Promise.all([
@@ -78,9 +88,10 @@ export default function ReportingDashboard() {
           ? societyResponse.data
           : [];
 
-        setSocieties(societyOptions);
-        setReport(reportResponse.data);
-        setAvailableCategories(Object.keys(reportResponse.data.category_counts || {}));
+        if (requestId === requestIdRef.current) {
+          setSocieties(societyOptions);
+          setReport(reportResponse.data);
+        }
       } catch (err) {
         console.error(err);
         setError("Unable to load reporting data. Please try again.");
@@ -100,10 +111,13 @@ export default function ReportingDashboard() {
     setLoading(true);
     setError("");
 
+    const requestId = ++requestIdRef.current;
+
     try {
       const reportResponse = await getReporting(filters);
-      setReport(reportResponse.data);
-      setAvailableCategories(Object.keys(reportResponse.data.category_counts || {}));
+      if (requestId === requestIdRef.current) {
+        setReport(reportResponse.data);
+      }
     } catch (err) {
       console.error(err);
       setError("Unable to load reporting data. Please try again.");
@@ -118,10 +132,13 @@ export default function ReportingDashboard() {
     setLoading(true);
     setError("");
 
+    const requestId = ++requestIdRef.current;
+
     try {
       const reportResponse = await getReporting({});
-      setReport(reportResponse.data);
-      setAvailableCategories(Object.keys(reportResponse.data.category_counts || {}));
+      if (requestId === requestIdRef.current) {
+        setReport(reportResponse.data);
+      }
     } catch (err) {
       console.error(err);
       setError("Unable to reset reporting filters.");
@@ -250,11 +267,13 @@ export default function ReportingDashboard() {
                 style={{ padding: "11px 14px", borderRadius: 12, border: "1px solid #cbd5e1", background: "#f8fafc", color: "#0f172a" }}
               >
                 <option value="">All societies</option>
-                {societies.map((society) => (
-                  <option key={society.id || society.name} value={society.id || society.name}>
-                    {society.name || "Unnamed Society"}
-                  </option>
-                ))}
+                {societies
+                  .filter((society) => society && (society.id !== undefined && society.id !== null))
+                  .map((society) => (
+                    <option key={String(society.id)} value={String(society.id)}>
+                      {society.name || "Unnamed Society"}
+                    </option>
+                  ))}
               </select>
             </div>
 
@@ -268,9 +287,9 @@ export default function ReportingDashboard() {
                 style={{ padding: "11px 14px", borderRadius: 12, border: "1px solid #cbd5e1", background: "#f8fafc", color: "#0f172a" }}
               >
                 <option value="">All categories</option>
-                {availableCategories.map((category) => (
-                  <option key={category} value={category}>
-                    {category || "(blank)"}
+                {REPORTING_CATEGORIES.map((category) => (
+                  <option key={category.value} value={category.value}>
+                    {category.label}
                   </option>
                 ))}
               </select>
